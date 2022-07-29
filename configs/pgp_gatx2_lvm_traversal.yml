@@ -25,10 +25,18 @@ test_set_args:
   random_flips: False
 
 batch_size: 32
-num_workers: 4
+num_workers: 64
 
 
 # Encoder parameters
+encoder_type: 'scout_encoder'
+# encoder_args:
+#   agent_feat_size: 5
+#   agent_enc_size: 32
+#   num_heads: 2
+#   lane_node_enc_size: 32
+#   lane_node_enc_depth: 3
+  
 encoder_type: 'pgp_encoder'
 encoder_args:
   target_agent_feat_size: 5

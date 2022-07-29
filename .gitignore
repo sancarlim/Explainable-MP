@@ -155,7 +155,7 @@ apollo_test_data.pkl
 *.avi
 *.zip
 
-
+events*
 .yml
 .pyc
 .txt
