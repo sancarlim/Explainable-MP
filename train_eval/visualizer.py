@@ -4,9 +4,9 @@ import matplotlib.pyplot as plt
 from typing import Dict, List
 from train_eval.initialization import initialize_prediction_model, initialize_dataset, get_specific_args
 from nuscenes.eval.prediction.splits import get_prediction_challenge_split
-from nuscenes.prediction.input_representation.static_layers import StaticLayerRasterizer
-from nuscenes.prediction.input_representation.agents import AgentBoxesWithFadedHistory
-from nuscenes.prediction.input_representation.interface import InputRepresentation
+from nuscenes.prediction.input_representation.static_layers_original import StaticLayerRasterizer
+from nuscenes.prediction.input_representation.agents_original import AgentBoxesWithFadedHistory
+from nuscenes.prediction.input_representation.interface_original import InputRepresentation
 from nuscenes.prediction.input_representation.combinators import Rasterizer
 import train_eval.utils as u
 import imageio

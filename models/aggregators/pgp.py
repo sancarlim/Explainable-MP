@@ -3,7 +3,7 @@ import torch.nn as nn
 from models.aggregators.aggregator import PredictionAggregator
 from typing import Dict
 from torch.distributions import Categorical
-from positional_encodings import PositionalEncoding1D
+from positional_encodings.torch_encodings import PositionalEncoding1D
 
 
 # Initialize device:

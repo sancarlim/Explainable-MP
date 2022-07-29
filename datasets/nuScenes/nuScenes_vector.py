@@ -11,6 +11,9 @@ from shapely.geometry.polygon import Polygon
 import os
 import pickle
 import torch
+from scipy import spatial 
+import dgl
+import scipy.sparse as spp
 
 
 class NuScenesVector(NuScenesTrajectories):
@@ -113,7 +116,7 @@ class NuScenesVector(NuScenesTrajectories):
         # Get agent representation in global co-ordinates
         global_pose = self.get_target_agent_global_pose(idx)
 
-        # Get lanes around agent within map_extent
+        # Get lanes around agent within map_extent (80m)
         lanes = self.get_lanes_around_agent(global_pose, map_api)
 
         # Get relevant polygon layers from the map_api
@@ -167,14 +170,44 @@ class NuScenesVector(NuScenesTrajectories):
         vehicles, vehicle_masks = self.list_to_tensor(vehicles, self.max_vehicles, self.t_h * 2 + 1, 5)
         pedestrians, pedestrian_masks = self.list_to_tensor(pedestrians, self.max_pedestrians, self.t_h * 2 + 1, 5)
 
+        # Get adjacency matrix
+        adj_matrix = self.get_adj_matrix(vehicles,vehicle_masks.any(-1),pedestrians,pedestrian_masks.any(-1))
+        
         surrounding_agent_representation = {
             'vehicles': vehicles,
             'vehicle_masks': vehicle_masks,
             'pedestrians': pedestrians,
-            'pedestrian_masks': pedestrian_masks
+            'pedestrian_masks': pedestrian_masks,
+            'adj_matrix': adj_matrix, 
         }
 
         return surrounding_agent_representation
+
+    def get_adj_matrix(self, vehicles, veh_masks, pedestrians, ped_masks):
+        """
+        Get adjacency matrix for the interaction graph
+        :param vehicles: ndarray with vehicle track histories, shape [max_vehicles, t_h * 2, 5]
+        :param pedestrians: ndarray with pedestrian track histories, shape [max_pedestrians, t_h * 2, 5]
+        :return: adjacency matrix 
+        """
+        # Adj matrix between target agent and all neighbors
+        adj_matrix = np.zeros((self.max_vehicles+self.max_pedestrians+1, self.max_vehicles+self.max_pedestrians+1))
+        index_veh = np.array( [ np.where(mask_i)[0][0]-1 if len(np.where(mask_i)[0])!=0 else -1 for mask_i in veh_masks])
+        index_ped = np.array( [ np.where(mask_i)[0][0]-1 if len(np.where(mask_i)[0])!=0 else -1 for mask_i in ped_masks])
+                    
+        agents_last_positions = np.concatenate((np.array([[0,0]]),vehicles[np.arange(vehicles.shape[0]), index_veh,:2],
+                                                pedestrians[np.arange(pedestrians.shape[0]), index_ped,:2]), axis=0) # [N agents, 2]
+        
+        # Compute distance between any pair of objects
+        dist_matrix = spatial.distance.cdist(agents_last_positions, agents_last_positions) 
+
+        # If distance between last positions is less than 40m, then they are adjacent
+        adj_matrix[dist_matrix < 40] = 1
+        mask = np.concatenate((np.array([1]), (~veh_masks).any(-1), (~ped_masks.any(-1))))
+        mask_adj = np.expand_dims(mask, axis=-1).repeat(adj_matrix.shape[1], axis=-1)*mask
+        adj_matrix = adj_matrix*mask_adj
+        return adj_matrix
+
 
     def get_target_agent_global_pose(self, idx: int) -> Tuple[float, float, float]:
         """
@@ -355,6 +388,9 @@ class NuScenesVector(NuScenesTrajectories):
         hist = self.helper.get_past_for_agent(i_t, s_t, seconds=self.t_h, in_agent_frame=True, just_xy=False)
 
         for k in range(len(hist)):
+            if k>3:
+                print(f"k Is bigger than 3 {k}")
+                break
             motion_states[-(k + 2), 0] = self.helper.get_velocity_for_agent(i_t, hist[k]['sample_token'])
             motion_states[-(k + 2), 1] = self.helper.get_acceleration_for_agent(i_t, hist[k]['sample_token'])
             motion_states[-(k + 2), 2] = self.helper.get_heading_change_rate_for_agent(i_t, hist[k]['sample_token'])

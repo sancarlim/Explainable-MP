@@ -95,27 +95,27 @@ class PGPEncoder(PredictionEncoder):
         target_agent_feats = inputs['target_agent_representation']
         target_agent_embedding = self.leaky_relu(self.target_agent_emb(target_agent_feats))
         _, target_agent_enc = self.target_agent_enc(target_agent_embedding)
-        target_agent_enc = target_agent_enc.squeeze(0)
+        target_agent_enc = target_agent_enc.squeeze(0) #B,32
 
         # Encode lane nodes
         lane_node_feats = inputs['map_representation']['lane_node_feats']
         lane_node_masks = inputs['map_representation']['lane_node_masks']
         lane_node_embedding = self.leaky_relu(self.node_emb(lane_node_feats))
-        lane_node_enc = self.variable_size_gru_encode(lane_node_embedding, lane_node_masks, self.node_encoder)
+        lane_node_enc = self.variable_size_gru_encode(lane_node_embedding, lane_node_masks, self.node_encoder) # B,164,32
 
         # Encode surrounding agents
         nbr_vehicle_feats = inputs['surrounding_agent_representation']['vehicles']
         nbr_vehicle_feats = torch.cat((nbr_vehicle_feats, torch.zeros_like(nbr_vehicle_feats[:, :, :, 0:1])), dim=-1)
         nbr_vehicle_masks = inputs['surrounding_agent_representation']['vehicle_masks']
         nbr_vehicle_embedding = self.leaky_relu(self.nbr_emb(nbr_vehicle_feats))
-        nbr_vehicle_enc = self.variable_size_gru_encode(nbr_vehicle_embedding, nbr_vehicle_masks, self.nbr_enc)
+        nbr_vehicle_enc = self.variable_size_gru_encode(nbr_vehicle_embedding, nbr_vehicle_masks, self.nbr_enc) #B,84,32
         nbr_ped_feats = inputs['surrounding_agent_representation']['pedestrians']
         nbr_ped_feats = torch.cat((nbr_ped_feats, torch.ones_like(nbr_ped_feats[:, :, :, 0:1])), dim=-1)
         nbr_ped_masks = inputs['surrounding_agent_representation']['pedestrian_masks']
         nbr_ped_embedding = self.leaky_relu(self.nbr_emb(nbr_ped_feats))
         nbr_ped_enc = self.variable_size_gru_encode(nbr_ped_embedding, nbr_ped_masks, self.nbr_enc)
 
-        # Agent-node attention
+        # Agent-node attention 
         nbr_encodings = torch.cat((nbr_vehicle_enc, nbr_ped_enc), dim=1)
         queries = self.query_emb(lane_node_enc).permute(1, 0, 2)
         keys = self.key_emb(nbr_encodings).permute(1, 0, 2)
@@ -137,7 +137,7 @@ class PGPEncoder(PredictionEncoder):
         lane_node_masks = ~lane_node_masks[:, :, :, 0].bool()
         lane_node_masks = lane_node_masks.any(dim=2)
         lane_node_masks = ~lane_node_masks
-        lane_node_masks = lane_node_masks.float()
+        lane_node_masks = lane_node_masks.float()  # 0 if node exists 
 
         # Return encodings
         encodings = {'target_agent_encoding': target_agent_enc,
@@ -169,14 +169,14 @@ class PGPEncoder(PredictionEncoder):
         """
 
         # Form a large batch of all sequences in the batch
-        masks_for_batching = ~masks[:, :, :, 0].bool()
-        masks_for_batching = masks_for_batching.any(dim=-1).unsqueeze(2).unsqueeze(3)
-        feat_embedding_batched = torch.masked_select(feat_embedding, masks_for_batching)
-        feat_embedding_batched = feat_embedding_batched.view(-1, feat_embedding.shape[2], feat_embedding.shape[3])
+        masks_for_batching = ~masks[:, :, :, 0].bool() # B, 164,20,6
+        masks_for_batching = masks_for_batching.any(dim=-1).unsqueeze(2).unsqueeze(3) # 32, 164,1,1
+        feat_embedding_batched = torch.masked_select(feat_embedding, masks_for_batching) 
+        feat_embedding_batched = feat_embedding_batched.view(-1, feat_embedding.shape[2], feat_embedding.shape[3]) # 970,20,16
 
         # Pack padded sequences
-        seq_lens = torch.sum(1 - masks[:, :, :, 0], dim=-1)
-        seq_lens_batched = seq_lens[seq_lens != 0].cpu()
+        seq_lens = torch.sum(1 - masks[:, :, :, 0], dim=-1) # B, 164
+        seq_lens_batched = seq_lens[seq_lens != 0].cpu() # Bx164 != 0 =» 970
         if len(seq_lens_batched) != 0:
             feat_embedding_packed = pack_padded_sequence(feat_embedding_batched, seq_lens_batched,
                                                          batch_first=True, enforce_sorted=False)
