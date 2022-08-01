@@ -171,14 +171,18 @@ class NuScenesVector(NuScenesTrajectories):
         pedestrians, pedestrian_masks = self.list_to_tensor(pedestrians, self.max_pedestrians, self.t_h * 2 + 1, 5)
 
         # Get adjacency matrix
-        adj_matrix = self.get_adj_matrix(vehicles,vehicle_masks.any(-1),pedestrians,pedestrian_masks.any(-1))
+        adj_matrix, len_adj = self.get_adj_matrix(vehicles,vehicle_masks.any(-1),pedestrians,pedestrian_masks.any(-1))
+        """ src, dst = np.nonzero(adj_matrix)
+        if len(src) == 0 or len(dst) == 0:
+            src, dst = np.array([0]), np.array([0]) """
         
         surrounding_agent_representation = {
             'vehicles': vehicles,
             'vehicle_masks': vehicle_masks,
             'pedestrians': pedestrians,
             'pedestrian_masks': pedestrian_masks,
-            'adj_matrix': adj_matrix, 
+            'adj_matrix': adj_matrix,  
+            'len_adj': len_adj
         }
 
         return surrounding_agent_representation
@@ -190,23 +194,37 @@ class NuScenesVector(NuScenesTrajectories):
         :param pedestrians: ndarray with pedestrian track histories, shape [max_pedestrians, t_h * 2, 5]
         :return: adjacency matrix 
         """
-        # Adj matrix between target agent and all neighbors
-        adj_matrix = np.zeros((self.max_vehicles+self.max_pedestrians+1, self.max_vehicles+self.max_pedestrians+1))
-        index_veh = np.array( [ np.where(mask_i)[0][0]-1 if len(np.where(mask_i)[0])!=0 else -1 for mask_i in veh_masks])
-        index_ped = np.array( [ np.where(mask_i)[0][0]-1 if len(np.where(mask_i)[0])!=0 else -1 for mask_i in ped_masks])
-                    
-        agents_last_positions = np.concatenate((np.array([[0,0]]),vehicles[np.arange(vehicles.shape[0]), index_veh,:2],
-                                                pedestrians[np.arange(pedestrians.shape[0]), index_ped,:2]), axis=0) # [N agents, 2]
-        
+        # Remove empty rows 
+        veh_masks = ~veh_masks[np.any(~veh_masks,-1)] 
+        ped_masks = ~ped_masks[np.any(~ped_masks,-1)] 
+        index_veh = np.array( [ np.where(mask_i)[0][-1] if len(np.where(mask_i)[0])!=0 else -1 for mask_i in veh_masks])
+        index_ped = np.array( [ np.where(mask_i)[0][-1] if len(np.where(mask_i)[0])!=0 else -1 for mask_i in ped_masks])
+        agents_last_positions = np.array([[0,0]])
+        if len(veh_masks) > 0:
+            vehicles_masked = vehicles[np.arange(veh_masks.shape[0]), index_veh,:2]
+            agents_last_positions = np.concatenate((agents_last_positions,vehicles_masked),axis=0)
+        else:
+            vehicles_masked = np.array(([[]]))
+        if len(ped_masks) > 0:
+            ped_masked = pedestrians[np.arange(ped_masks.shape[0]), index_ped,:2]
+            agents_last_positions = np.concatenate((agents_last_positions,ped_masked),axis=0)
+        else:
+            ped_masked = np.array(([[]])) 
+
         # Compute distance between any pair of objects
         dist_matrix = spatial.distance.cdist(agents_last_positions, agents_last_positions) 
 
         # If distance between last positions is less than 40m, then they are adjacent
-        adj_matrix[dist_matrix < 40] = 1
-        mask = np.concatenate((np.array([1]), (~veh_masks).any(-1), (~ped_masks.any(-1))))
-        mask_adj = np.expand_dims(mask, axis=-1).repeat(adj_matrix.shape[1], axis=-1)*mask
-        adj_matrix = adj_matrix*mask_adj
-        return adj_matrix
+        # Adj matrix between target agent and all neighbors
+        adj_matrix = np.zeros_like(dist_matrix) 
+        adj_matrix[dist_matrix < 20] = 1  
+
+        # Convert to fixed size for batching 
+        len_adj = len(adj_matrix)
+        adj_array = np.zeros((self.max_vehicles+self.max_pedestrians+1, self.max_vehicles+self.max_pedestrians+1))
+        adj_array[:len_adj, :len_adj] = adj_matrix
+
+        return adj_array, len_adj
 
 
     def get_target_agent_global_pose(self, idx: int) -> Tuple[float, float, float]:

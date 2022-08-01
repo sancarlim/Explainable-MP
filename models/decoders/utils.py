@@ -5,7 +5,7 @@ from sklearn.cluster import KMeans
 import psutil
 import ray
 from scipy.spatial.distance import cdist
-
+import numpy
 
 # Initialize device:
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -134,7 +134,7 @@ def cluster_traj(k: int, traj: torch.Tensor):
     cluster_ranks = [cluster_op['ranks'] for cluster_op in cluster_ops]
 
     # Compute mean (clustered) traj and scores
-    lbls = torch.as_tensor(cluster_lbls, device=device).unsqueeze(-1).unsqueeze(-1).repeat(1, 1, traj_len, 2).long()
+    lbls = torch.as_tensor(numpy.array(cluster_lbls), device=device).unsqueeze(-1).unsqueeze(-1).repeat(1, 1, traj_len, 2).long()
     traj_summed = torch.zeros(batch_size, k, traj_len, 2, device=device).scatter_add(1, lbls, traj)
     cnt_tensor = torch.as_tensor(cluster_counts, device=device).unsqueeze(-1).unsqueeze(-1).repeat(1, 1, traj_len, 2)
     traj_clustered = traj_summed / cnt_tensor

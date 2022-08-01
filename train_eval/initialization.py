@@ -40,7 +40,7 @@ def initialize_dataset(dataset_type: str, args: List) -> TrajectoryDataset:
     Helper function to initialize appropriate dataset by dataset type string
     """
     # TODO: Add more datasets as implemented
-    dataset_classes = {'nuScenes_single_agent_raster': NuScenesRaster,
+    dataset_classes = {#'nuScenes_single_agent_raster': NuScenesRaster,
                        'nuScenes_single_agent_vector': NuScenesVector,
                        'nuScenes_single_agent_graphs': NuScenesGraphs,
                        }

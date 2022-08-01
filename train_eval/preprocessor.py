@@ -7,7 +7,7 @@ import pickle
 from train_eval.initialization import get_specific_args, initialize_dataset
 
 
-def preprocess_data(cfg: Dict, data_root: str, data_dir: str, compute_stats=True, extract=True):
+def preprocess_data(cfg: Dict, data_root: str, data_dir: str, compute_stats=False, extract=True):
     """
     Main function for pre-processing data
 

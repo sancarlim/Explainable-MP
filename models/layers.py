@@ -303,7 +303,7 @@ class MLP(nn.Module):
     def forward(self, hidden_states):
         hidden_states = self.linear(hidden_states)
         hidden_states = self.layer_norm(hidden_states)
-        hidden_states = torch.nn.functional.relu(hidden_states)
+        hidden_states = F.leaky_relu(hidden_states)
         if self.final:
             return self.final_linear(hidden_states)
         return hidden_states
@@ -409,7 +409,7 @@ class GlobalGraph(nn.Module):
 
     def forward(self, hidden_states, attention_mask=None, mapping=None, return_scores=False):
         mixed_query_layer = self.query(hidden_states) # (batch, max_vector_num, hidden_dim)
-        mixed_key_layer = nn.functional.linear(hidden_states, self.key.weight) # why? looks the same as self.key
+        mixed_key_layer = nn.functional.linear(hidden_states, self.key.weight) 
         mixed_value_layer = self.value(hidden_states)
 
         query_layer = self.transpose_for_scores(mixed_query_layer)  # (batch, num heads, max_vector_num, head_size)

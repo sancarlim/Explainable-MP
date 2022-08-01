@@ -37,10 +37,14 @@ class Trainer:
         datasets = {'train': train_set, 'val': val_set}
 
         # Initialize dataloaders
+        if cfg['encoder_type'] == 'scout_encoder':
+            collate_fn = u.collate_fn_dgl
+        else:
+            collate_fn = None
         self.tr_dl = torch_data.DataLoader(datasets['train'], cfg['batch_size'], shuffle=True,
-                                           num_workers=cfg['num_workers'], pin_memory=True)
+                                           num_workers=cfg['num_workers'], pin_memory=True, collate_fn=collate_fn)
         self.val_dl = torch_data.DataLoader(datasets['val'], cfg['batch_size'], shuffle=False,
-                                            num_workers=cfg['num_workers'], pin_memory=True)
+                                            num_workers=cfg['num_workers'], pin_memory=True, collate_fn=collate_fn )
 
         # Initialize model
         self.model = initialize_prediction_model(cfg['encoder_type'], cfg['aggregator_type'], cfg['decoder_type'],

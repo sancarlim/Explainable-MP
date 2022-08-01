@@ -1,3 +1,4 @@
+from code import interact
 from models.encoders.encoder import PredictionEncoder
 import torch
 import torch.nn as nn
@@ -264,13 +265,14 @@ class MultiHeadGATLayer(nn.Module):
 
 class NewSubGraph(nn.Module):
 
-    def __init__(self, hidden_size, depth=None):
+    def __init__(self, input_size ,hidden_size, depth=None):
         super(NewSubGraph, self).__init__()
         if depth is None:
             depth = 3
         self.hidden_size = hidden_size 
         
-        self.lane_emb = nn.ModuleList([MLP(hidden_size) for _ in range(2)]) 
+        self.lane_emb = MLP(input_size, hidden_size) 
+        self.lane_enc = MLP(hidden_size)  
         self.layers = nn.ModuleList([GlobalGraph(hidden_size, num_attention_heads=2) for _ in range(depth)]) # depth = 3
         self.layers_2 = nn.ModuleList([LayerNorm(hidden_size) for _ in range(depth)]) 
     
@@ -279,24 +281,24 @@ class NewSubGraph(nn.Module):
         # [B, max_n_lane_segments, 20, 6]  
         batch_size = lane_nodes_feat.shape[0] # N polylines in batch
         device = lane_nodes_feat[0].device 
-        max_length = lane_nodes_feat.shape[1]
+        max_length = lane_nodes_feat.shape[-2]
 
         # Lane nodes embedding
-        lane_nodes_emb = self.lane_emb[0](lane_nodes_feat)
-        lane_nodes_emb = self.lane_emb[1](lane_nodes_emb)  # [B,164,20,16]
+        lane_nodes_emb = self.lane_emb(lane_nodes_feat)
+        lane_nodes_emb = self.lane_enc(lane_nodes_emb)  # [B,164,20,32]
 
         # Form a large batch of all sequences in the batch
         masks_for_batching = ~masks[:, :, :, 0].bool() # [B,164,20,6]
         masks_for_batching = masks_for_batching.any(dim=-1).unsqueeze(2).unsqueeze(3) # [B,164,1,1]
         feat_embedding_batched = torch.masked_select(lane_nodes_emb, masks_for_batching) 
-        feat_embedding_batched = feat_embedding_batched.view(-1, lane_nodes_emb.shape[2], lane_nodes_emb.shape[3]) # [(Bx164),20,16]
+        hidden_states = feat_embedding_batched.view(-1, lane_nodes_emb.shape[2], lane_nodes_emb.shape[3]) # [(Bx164),20,32]
 
         # Length of each sequence in the batch
         seq_lens = torch.sum(1 - masks[:, :, :, 0], dim=-1)
-        seq_lens_batched = seq_lens[seq_lens != 0].cpu() # (Bx164) != 0
+        seq_lens_batched = seq_lens[seq_lens != 0].cpu().int() # (Bx164) != 0
 
         # Create attention mask
-        attention_mask = torch.zeros([feat_embedding_batched.shape[0], max_length, max_length], device=device) # [(Bx164),20,20]
+        attention_mask = torch.zeros([hidden_states.shape[0], max_length, max_length], device=device) # [(Bx164),20,20]
         for i in range(batch_size):
             assert seq_lens_batched[i] > 0
             attention_mask[i, :seq_lens_batched[i], :seq_lens_batched[i]].fill_(1)
@@ -308,13 +310,14 @@ class NewSubGraph(nn.Module):
             hidden_states = F.relu(hidden_states)
             hidden_states = hidden_states + temp
             hidden_states = self.layers_2[layer_index](hidden_states) 
-        
+        hidden_states = torch.max(hidden_states, dim=1)[0] 
+
         # Scatter back to appropriate batch index
         masks_for_scattering = masks_for_batching.squeeze(3).repeat(1, 1, hidden_states.shape[-1])
         lane_encoding = torch.zeros(masks_for_scattering.shape, device=device)
         lane_encoding = lane_encoding.masked_scatter(masks_for_scattering, hidden_states)
 
-        return torch.max(lane_encoding, dim=-2)[0] #, torch.cat(utils.de_merge_tensors(hidden_states, lengths))
+        return lane_encoding  
 
 
 
@@ -349,29 +352,29 @@ class SCOUTEncoder(PredictionEncoder):
         self.target_agent_enc = AgentNet(n_agent=args['agent_enc_size'], in_channels=args['agent_feat_size'])
 
         # Surrounding agent encoder (different weights for veh/ped)
-        self.nbr_enc = AgentNet(n_agent=args['agent_enc_size'], in_channels=args['agent_feat_size']) 
+        self.nbr_enc = AgentNet(n_agent=args['agent_enc_size'], in_channels=args['nbr_feat_size']) 
         
         # Agent interaction (agent||veh_nbr||ped_nbr -» agent_nbr_context) ! 
         self.interaction_net = GATv2Conv(args['agent_enc_size'], args['agent_enc_size'], 
                                          num_heads=args['num_heads'], feat_drop=0., attn_drop=0., share_weights=True,
-                                         residual=True, activation=F.elu)  
+                                         residual=True, activation=F.elu, allow_zero_in_degree=True)  
 
         # Lane node encoders
-        self.lane_node_emb = NewSubGraph(args['lane_node_enc_size'], args['lane_node_enc_depth']) 
+        self.lane_node_emb = NewSubGraph(args['lane_node_feat_size'], args['lane_node_enc_size'], args['lane_node_enc_depth']) 
 
 
         # Agent-node attention
         self.query_emb = nn.Linear(args['lane_node_enc_size'], args['lane_node_enc_size'])
-        self.key_emb = nn.Linear(args['agent_enc_size'], args['lane_node_enc_size'])
-        self.val_emb = nn.Linear(args['agent_enc_size'], args['lane_node_enc_size'])
+        self.key_emb = nn.Linear(args['agent_enc_size']*3, args['agent_enc_size']*3)
+        self.val_emb = nn.Linear(args['agent_enc_size']*3, args['agent_enc_size']*3)
         self.a_n_att = nn.MultiheadAttention(args['lane_node_enc_size'], num_heads=1)
-        self.mix = nn.Linear(args['lane_node_enc_size']*2, args['lane_node_enc_size'])
+        self.mix = nn.Linear(args['lane_node_enc_size']*2, args['aggregator_enc_size'])
 
         # Non-linearities
         self.leaky_relu = nn.LeakyReLU()
 
         # GAT layers
-        self.gat = nn.ModuleList([GAT(args['lane_node_enc_size'], args['lane_node_enc_size'])
+        self.gat = nn.ModuleList([GAT(args['aggregator_enc_size'], args['aggregator_enc_size'])
                                   for _ in range(args['num_heads'])])
 
     def forward(self, inputs: Dict) -> Dict:
@@ -414,34 +417,63 @@ class SCOUTEncoder(PredictionEncoder):
         nbr_vehicle_feats = torch.cat((nbr_vehicle_feats, torch.zeros_like(nbr_vehicle_feats[:, :, :, :1])), dim=-1)       
         # Add mask to account for the non-existent frames
         nbr_vehicle_feats = torch.cat((nbr_vehicle_feats, nbr_vehicle_masks[:,:,:,:1]), dim=-1)
-        nbr_vehicle_batched = self.create_batched_input(nbr_vehicle_feats, nbr_vehicle_masks)
+        nbr_vehicle_batched, masks_for_batching_veh = self.create_batched_input(nbr_vehicle_feats, nbr_vehicle_masks)
         nbr_vehicle_enc = self.nbr_enc(nbr_vehicle_batched.permute(0,2,1))
+        nbr_vehicle_enc = self.scatter_batched_input(nbr_vehicle_enc, masks_for_batching_veh)
         nbr_ped_feats = inputs['surrounding_agent_representation']['pedestrians']
         nbr_ped_feats = torch.cat((nbr_ped_feats, torch.ones_like(nbr_ped_feats[:, :, :, 0:1])), dim=-1) 
         nbr_ped_masks = inputs['surrounding_agent_representation']['pedestrian_masks']
         nbr_ped_feats = torch.cat((nbr_ped_feats, nbr_ped_masks[:,:,:,:1]), dim=-1)
-        nbr_ped_batched = self.create_batched_input(nbr_ped_feats, nbr_ped_masks)
+        nbr_ped_batched, masks_for_batching_ped = self.create_batched_input(nbr_ped_feats, nbr_ped_masks)
         nbr_ped_enc = self.nbr_enc(nbr_ped_batched.permute(0,2,1))
+        nbr_ped_enc = self.scatter_batched_input(nbr_ped_enc, masks_for_batching_ped)
 
-        # Agent interaction (agent||veh_nbr||ped_nbr -» agent_nbr_context) ! 
-        adj = inputs['adj_matrix']
-        interaction_graph = dgl.from_scipy(spp.coo_matrix(adj)).int()
-        interaction_graph = dgl.add_self_loop(interaction_graph)
+
+        interaction_feats = torch.cat((target_agent_enc.unsqueeze(1),nbr_vehicle_enc, nbr_ped_enc), dim=1)
+        target_masks = torch.ones((target_agent_enc.shape[0], 1, 1), device=target_agent_enc.device).bool()
+        interaction_masks = torch.cat((target_masks, masks_for_batching_veh.squeeze(-1),masks_for_batching_ped.squeeze(-1)), dim=1).repeat(1,1,interaction_feats.shape[-1])
+        interaction_feats_batched = torch.masked_select(interaction_feats, interaction_masks!=0) 
+        interaction_feats_batched = interaction_feats_batched.view(-1, interaction_feats.shape[2]) # BN,32
+
+        # Use mask for batching 
+        """ 
+        sum=0
+        for i, len_nbr in enumerate(inputs['surrounding_agent_representation']['len_adj']):
+            interaction_feats = torch.cat((target_agent_enc[i].unsqueeze(0), nbr_enc[sum:sum+len_nbr-1]), dim=0) 
+            sum+=len_nbr-1 """
+        
+        # Agent interaction (agent||veh_nbr||ped_nbr [32,162,32]-» agent_nbr_context) ! 
+        interaction_graph = inputs['graphs'].to(target_agent_feats.device)
+        #dst = inputs['surrounding_agent_representation']['dst_nodes']
+        #interaction_graph = dgl.graph((src, dst))  
         interaction_graph.create_formats_()
-        interaction_feats = torch.cat((target_agent_enc, nbr_vehicle_enc, nbr_ped_enc), dim=0) 
-        self.interaction_net(interaction_graph, interaction_feats, None)
+        #interaction_feats = torch.cat((target_agent_enc, nbr_vehicle_enc, nbr_ped_enc), dim=0) 
+        agent_nbr_context = self.interaction_net(interaction_graph, interaction_feats_batched, None)
+        # Concatenate outputs of the different heads
+        agent_nbr_context = agent_nbr_context.view(agent_nbr_context.shape[0],-1)
+
+        # Concatenate agents encodings and agent_nbr_context
+        interaction_feats_batched = torch.cat((interaction_feats_batched, agent_nbr_context), dim=-1) # BN,32
+        interaction_feats = self.scatter_batched_input(interaction_feats_batched, interaction_masks[:,:,-1:].unsqueeze(-1)) # B, N, 32
+
+        # nbr_vehicle_enc = torch.cat((nbr_vehicle_enc, agent_nbr_context[1:1+nbr_vehicle_enc.shape[0]]), dim=-1)
+        # nbr_ped_enc = torch.cat((nbr_ped_enc, agent_nbr_context[1+nbr_vehicle_enc.shape[0]:]), dim=-1) 
 
         # Encode lane nodes
         lane_node_feats = inputs['map_representation']['lane_node_feats']
         lane_node_masks = inputs['map_representation']['lane_node_masks'] 
-        lane_node_enc = self.lane_node_emb(lane_node_feats, lane_node_masks)
+        lane_node_enc = self.lane_node_emb(lane_node_feats, lane_node_masks)  
 
        
-        # Agent-node attention
-        nbr_encodings = torch.cat((nbr_vehicle_enc, nbr_ped_enc), dim=1)
+        # Agent-node attention (between nbrs and lanes)
+        veh_interaction_feats = torch.cuda.FloatTensor(interaction_feats.shape[0],nbr_vehicle_feats.shape[1], interaction_feats.shape[-1])
+        ped_interaction_feats = torch.cuda.FloatTensor(interaction_feats.shape[0],nbr_ped_feats.shape[1], interaction_feats.shape[-1]) 
+        for i, batch in enumerate(interaction_feats): 
+            veh_interaction_feats[i] = interaction_feats[i,1:nbr_vehicle_feats.shape[1]+1]
+            ped_interaction_feats[i] = interaction_feats[i,-nbr_ped_feats.shape[1]:]
         queries = self.query_emb(lane_node_enc).permute(1, 0, 2)
-        keys = self.key_emb(nbr_encodings).permute(1, 0, 2)
-        vals = self.val_emb(nbr_encodings).permute(1, 0, 2)
+        keys = self.key_emb(torch.cat((veh_interaction_feats, ped_interaction_feats), dim=1)).permute(1, 0, 2)
+        vals = self.val_emb(torch.cat((veh_interaction_feats, ped_interaction_feats), dim=1)).permute(1, 0, 2)
         attn_masks = torch.cat((inputs['agent_node_masks']['vehicles'],
                                 inputs['agent_node_masks']['pedestrians']), dim=2)
         att_op, _ = self.a_n_att(queries, keys, vals, attn_mask=attn_masks)
@@ -462,9 +494,10 @@ class SCOUTEncoder(PredictionEncoder):
         lane_node_masks = lane_node_masks.float()
 
         # Return encodings
-        encodings = {'target_agent_encoding': target_agent_enc,
+        encodings = {'target_agent_encoding': target_agent_enc, #before interaction
                      'context_encoding': {'combined': lane_node_enc,
                                           'combined_masks': lane_node_masks,
+                                          'interaction'
                                           'map': None,
                                           'vehicles': None,
                                           'pedestrians': None,
@@ -491,14 +524,25 @@ class SCOUTEncoder(PredictionEncoder):
         of sequences, of variable lengths.
         """
         # Form a large batch of all sequences in the batch
-        masks_for_batching = ~masks[:, :, :, 0].bool() # B, N,20,6
-        input = torch.vstack((input, masks_for_batching), dim=-1) # B, N, 20, 7
+        masks_for_batching = ~masks[:, :, :, 0].bool() # B, N,20,6 
         masks_for_batching = masks_for_batching.any(dim=-1).unsqueeze(2).unsqueeze(3) # B, N,1,1
         input_batched = torch.masked_select(input, masks_for_batching) 
         input_batched = input_batched.view(-1, input.shape[2], input.shape[3]) # BN,20,16
         
-        return input_batched
+        return input_batched, masks_for_batching
 
+    @staticmethod
+    def scatter_batched_input(batched_input: torch.Tensor, masks_for_batching: torch.Tensor) -> torch.Tensor:
+        """
+        Create a batch of inputs where each sample in the batch is a set of a variable number
+        of sequences, of variable lengths.
+        """
+        # Scatter back to appropriate batch index
+        masks_for_scattering = masks_for_batching.squeeze(-1).repeat(1, 1, batched_input.shape[-1])
+        input = torch.zeros(masks_for_scattering.shape, device=device)
+        input = input.masked_scatter(masks_for_scattering, batched_input)
+
+        return input
 
 
 

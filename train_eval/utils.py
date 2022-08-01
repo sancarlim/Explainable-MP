@@ -2,6 +2,9 @@ import torch.optim
 from typing import Dict, Union
 import torch
 import numpy as np
+import dgl
+import scipy.sparse as spp
+from torch.utils.data._utils.collate import default_collate
 
 
 # Initialize device:
@@ -33,7 +36,7 @@ def send_to_device(data: Union[Dict, torch.Tensor]):
             data[k] = send_to_device(v)
         return data
     else:
-        return data
+        return data 
 
 
 def convert2tensors(data):
@@ -48,3 +51,19 @@ def convert2tensors(data):
         return data
     else:
         return data
+
+
+
+def collate_fn_dgl(batch): 
+    # Collate function for dataloader.
+    adj_matrix = [element['inputs']['surrounding_agent_representation']['adj_matrix'] for element in batch]
+    len_adj = [element['inputs']['surrounding_agent_representation']['len_adj'] for element in batch]
+    adj_matrix = [adj[:len, :len] for adj, len in zip(adj_matrix, len_adj)]
+    graphs = [dgl.from_scipy(spp.coo_matrix(adj)).int() for adj in adj_matrix]
+    #[dgl.graph((s,d)) for s,d in zip(src,dst)] 
+    # graphs = [dgl.add_self_loop(graph) for graph in graphs]
+    batched_graph = dgl.batch(graphs)
+    # batched_graph = dgl.add_self_loop(batched_graph) NO pq mete self loops en nodos que no existen
+    data = default_collate(batch)
+    data['inputs']['graphs'] = batched_graph
+    return data
