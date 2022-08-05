@@ -5,8 +5,8 @@ input_representation: 'graphs'
 
 train_set_args:
   split: 'train'
-  t_h: 2
-  t_f: 6
+  t_h: 3
+  t_f: 4
   map_extent: [-50, 50, -20, 80]
   polyline_resolution: 1
   polyline_length: 20
@@ -14,8 +14,8 @@ train_set_args:
 
 val_set_args:
   split: 'train_val'
-  t_h: 2
-  t_f: 6
+  t_h: 3
+  t_f: 4
   map_extent: [-50, 50, -20, 80]
   polyline_resolution: 1
   polyline_length: 20
@@ -23,8 +23,8 @@ val_set_args:
 
 test_set_args:
   split: 'val'
-  t_h: 2
-  t_f: 6
+  t_h: 3
+  t_f: 4
   map_extent: [-50, 50, -20, 80]
   polyline_resolution: 1
   polyline_length: 20
