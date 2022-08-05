@@ -159,3 +159,5 @@ events*
 .yml
 .pyc
 .txt
+*.gif
+wandb/
