@@ -8,15 +8,37 @@ from nuscenes.prediction.input_representation.static_layers_original import Stat
 from nuscenes.prediction.input_representation.agents import AgentBoxesWithFadedHistory
 from nuscenes.prediction.input_representation.interface_original import InputRepresentation
 from nuscenes.prediction.input_representation.combinators import Rasterizer
+from nuscenes.prediction.helper import convert_local_coords_to_global
 import train_eval.utils as u
 import imageio
 import os
 import dgl
 import scipy.sparse as spp
 from nuscenes.map_expansion.map_api import NuScenesMap
+from scipy.ndimage import rotate
+from pyquaternion import Quaternion
+from nuscenes.eval.common.utils import quaternion_yaw 
+from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+import math
 
 # Initialize device:
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+patch_margin = 50
+min_diff_patch = 50
+ego_car = plt.imread('/media/14TBDISK/sandra//DBU_Graph/NuScenes/icons/Car TOP_VIEW ROBOT.png')
+agent = plt.imread('/media/14TBDISK/sandra/DBU_Graph/NuScenes/icons/Car TOP_VIEW 375397.png')
+cars = plt.imread('/media/14TBDISK/sandra/DBU_Graph/NuScenes/icons/Car TOP_VIEW F05F78.png') 
+
+layers = ['drivable_area',
+          'road_segment',
+          'lane',
+          'ped_crossing',
+          'walkway',
+          'stop_line',
+          'carpark_area',
+          'stop_line',
+          'road_divider',
+          'lane_divider']
 
 
 class Visualizer:
@@ -173,34 +195,108 @@ class Visualizer:
 
         raster_maps = InputRepresentation(static_layer_rasterizer, agent_rasterizer, Rasterizer())
 
+
+        s_t = self.ds[idcs[0]]['inputs']['sample_token']
+        scene=self.ns.get('scene', self.ns.get('sample',s_t)['scene_token'])
+        scene_name=scene['name']
+        log=self.ns.get('log', scene['log_token'])
+        location = log['location']
+        nusc_map = NuScenesMap(dataroot=self.dataroot, map_name=location)
+
         imgs = []
         imgs_fancy = []
         graph_img = []
-        for idx in idcs:
-
+        for idx in idcs: 
             # Load data
             data = self.ds[idx]
             data = u.send_to_device(u.convert_double_to_float(u.convert2tensors(data)))
             i_t = data['inputs']['instance_token']
             s_t = data['inputs']['sample_token']
-
-            scene=self.ns.get('scene', self.ns.get('sample',s_t)['scene_token'])
-            scene_name=scene['name']
-            log=self.ns.get('log', scene['log_token'])
-            location = log['location']
-            nusc_map = NuScenesMap(dataroot=self.dataroot, map_name=location)
-            map_poses, fig2, ax2 = nusc_map.render_egoposes_on_fancy_map(self.ns, scene['token'])
+            annotations = self.ds.helper.get_annotations_for_sample(s_t)
+            past = self.ds.helper.get_past_for_sample(s_t,2,False)
+            future = self.ds.helper.get_future_for_sample(s_t,6,False) 
+            
+            # map_poses, fig2, ax2 = nusc_map.render_egoposes_on_fancy_map(self.ns, scene['token'], )
 
             sample_record = self.ns.get('sample', s_t)
             sample_data_record = self.ns.get('sample_data', sample_record['data']['LIDAR_TOP'])
             pose_record = self.ns.get('ego_pose', sample_data_record['ego_pose_token'])
+            ego_poses=np.array(pose_record['translation'][:2])
             # Retrieve ego history 
             for history_t in reversed(range(4)):
                 prev_sample_data = self.ns.get('sample_data', sample_data_record['prev'])
-                history_name = 'history_' + str(history_t)
+                history_name = 'history_' + str(history_t)  
                 pose_record[history_name] = self.ns.get('ego_pose', prev_sample_data['ego_pose_token'])['translation']
                 pose_record[history_name].append(self.ns.get('ego_pose', prev_sample_data['ego_pose_token'])['rotation'])
 
+            # Render the map patch with the current ego poses.
+            min_patch = np.floor(ego_poses - patch_margin)
+            max_patch = np.ceil(ego_poses + patch_margin)
+            diff_patch = max_patch - min_patch
+            if any(diff_patch < min_diff_patch):
+                center_patch = (min_patch + max_patch) / 2
+                diff_patch = np.maximum(diff_patch, min_diff_patch)
+                min_patch = center_patch - diff_patch / 2
+                max_patch = center_patch + diff_patch / 2
+            my_patch = (min_patch[0], min_patch[1], max_patch[0], max_patch[1])
+            
+            fig2, ax2 = nusc_map.render_map_patch(my_patch, layers, figsize=(10, 10), alpha=0.3,
+                                        render_egoposes_range=False,
+                                        render_legend=True, bitmap=None)
+                                        
+            r_img = rotate(ego_car, quaternion_yaw(Quaternion(pose_record['rotation']))*180/math.pi,reshape=True)
+            oi = OffsetImage(r_img, zoom=0.02, zorder=500)
+            veh_box = AnnotationBbox(oi, (ego_poses[0], ego_poses[1]), frameon=False)
+            veh_box.zorder = 500
+            ax2.add_artist(veh_box)
+
+            for ann in annotations:
+                #Plot history
+                if len(past[ann['instance_token']]) > 0:
+                    history =  np.concatenate((past[ann['instance_token']][::-1], np.array([ann['translation'][:2]])))
+                else:
+                    history = np.array([ann['translation'][:2]])
+                ax2.plot(history[:, 0], history[:, 1], 'k--')
+
+                #Plot future
+                if len(future[ann['instance_token']]) > 0:
+                    ax2.plot(future[ann['instance_token']][:, 0], 
+                            future[ann['instance_token']][:, 1], 
+                            'w--')
+                    
+                # Current Node Position
+                node_circle_size=0.3
+                circle_edge_width=0.5
+                if ann['instance_token'] == i_t:
+                    r_img = rotate(agent, quaternion_yaw(Quaternion(ann['rotation']))*180/math.pi,reshape=True)
+                    oi = OffsetImage(r_img, zoom=0.01, zorder=500)
+                    veh_box = AnnotationBbox(oi, (history[-1, 0], history[-1, 1]), frameon=False)
+                    veh_box.zorder = 800
+                    ax2.add_artist(veh_box) 
+                elif ann['category_name'].split('.')[0] == 'vehicle':
+                    r_img = rotate(cars, quaternion_yaw(Quaternion(ann['rotation']))*180/math.pi,reshape=True)
+                    oi = OffsetImage(r_img, zoom=0.01, zorder=500)
+                    veh_box = AnnotationBbox(oi, (history[-1, 0], history[-1, 1]), frameon=False)
+                    veh_box.zorder = 800
+                    ax2.add_artist(veh_box) 
+                elif ann['category_name'].split('.')[1] == 'motorcycle' or ann['category_name'].split('.')[1] == 'bicycle':
+                    circle = plt.Circle((history[-1, 0],
+                                history[-1, 1]),
+                                node_circle_size,
+                                facecolor='y',
+                                edgecolor='y',
+                                lw=circle_edge_width,
+                                zorder=3)
+                    ax2.add_artist(circle)
+                else: 
+                    circle = plt.Circle((history[-1, 0],
+                                history[-1, 1]),
+                                node_circle_size,
+                                facecolor='c',
+                                edgecolor='c',
+                                lw=circle_edge_width,
+                                zorder=3)
+                    ax2.add_artist(circle)
 
             # Get raster map
             hd_map = raster_maps.make_input_representation(i_t, s_t, pose_record)
@@ -230,6 +326,9 @@ class Visualizer:
                            color='r', alpha=0.8)
                 ax[1].scatter(traj[-1, 0].detach().cpu().numpy(), traj[-1, 1].detach().cpu().numpy(), 60,
                               color='r', alpha=0.8)
+                global_traj = convert_local_coords_to_global(traj.detach().cpu().numpy(), pose_record['translation'], pose_record['rotation'])
+                ax2.plot(global_traj[:, 0], global_traj[:, 1], '-bo', lw=4, markersize=2, linestyle = '--', alpha=0.8) 
+                
                 self.visualize_graph(fig3,ax3,data['inputs']['map_representation']['lane_node_feats'][0].detach().cpu().numpy(), 
                                         data['inputs']['map_representation']['s_next'][0].detach().cpu().numpy(), data['inputs']['map_representation']['edge_type'][0].detach().cpu().numpy(),
                                         data['ground_truth']['evf_gt'][0].detach().cpu().numpy(), data['inputs']['node_seq_gt'][0].detach().cpu().numpy(), traj.detach().cpu().numpy())
