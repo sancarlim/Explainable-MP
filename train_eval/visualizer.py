@@ -4,14 +4,16 @@ import matplotlib.pyplot as plt
 from typing import Dict, List
 from train_eval.initialization import initialize_prediction_model, initialize_dataset, get_specific_args
 from nuscenes.eval.prediction.splits import get_prediction_challenge_split
-from nuscenes.prediction.input_representation.static_layers_original import StaticLayerRasterizer
-from nuscenes.prediction.input_representation.agents_original import AgentBoxesWithFadedHistory
+from nuscenes.prediction.input_representation.static_layers_original import StaticLayerRasterizer, color_by_yaw
+from nuscenes.prediction.input_representation.agents import AgentBoxesWithFadedHistory
 from nuscenes.prediction.input_representation.interface_original import InputRepresentation
 from nuscenes.prediction.input_representation.combinators import Rasterizer
 import train_eval.utils as u
 import imageio
 import os
-
+import dgl
+import scipy.sparse as spp
+from nuscenes.map_expansion.map_api import NuScenesMap
 
 # Initialize device:
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -33,8 +35,11 @@ class Visualizer:
         # Initialize dataset
         ds_type = cfg['dataset'] + '_' + cfg['agent_setting'] + '_' + cfg['input_representation']
         spec_args = get_specific_args(cfg['dataset'], data_root, cfg['version'] if 'version' in cfg.keys() else None)
-        test_set = initialize_dataset(ds_type, ['load_data', data_dir, cfg['test_set_args']] + spec_args)
+        test_set = initialize_dataset(ds_type, ['load_data', data_dir, cfg['test_set_args']] + spec_args[0])
         self.ds = test_set
+        self.encoder_type = cfg['encoder_type']
+        self.ns = spec_args[1][0]
+        self.dataroot = data_root
 
         # Initialize model
         self.model = initialize_prediction_model(cfg['encoder_type'], cfg['aggregator_type'], cfg['decoder_type'],
@@ -61,9 +66,13 @@ class Visualizer:
         if not os.path.isdir(os.path.join(output_dir, 'results', 'gifs')):
             os.mkdir(os.path.join(output_dir, 'results', 'gifs'))
         for n, indices in enumerate(index_list):
-            imgs = self.generate_nuscenes_gif(indices)
+            imgs, fancy_img, graph_img = self.generate_nuscenes_gif(indices)
             filename = os.path.join(output_dir, 'results', 'gifs', 'example' + str(n) + '.gif')
             imageio.mimsave(filename, imgs, format='GIF', fps=2)
+            filename = os.path.join(output_dir, 'results', 'gifs', 'example' + str(n) + '_fancy.gif')
+            imageio.mimsave(filename, fancy_img, format='GIF', fps=2)
+            filename = os.path.join(output_dir, 'results', 'gifs', 'example' + str(n) + '_graph.gif')
+            imageio.mimsave(filename, graph_img, format='GIF', fps=2)
 
     def get_vis_idcs_nuscenes(self):
         """
@@ -85,6 +94,59 @@ class Visualizer:
             idcs.append(idcs_i_t)
 
         return idcs
+
+    def visualize_graph(self, fig, ax, node_feats, s_next, edge_type, evf_gt, node_seq, fut_xy):
+        """
+        Function to visualize lane graph.
+        """ 
+        ax.imshow(np.zeros((3, 3)), extent=[-60,60,-40,100], cmap='gist_gray')
+
+        # Plot edges
+        for src_id, src_feats in enumerate(node_feats):
+            feat_len = np.sum(np.sum(np.absolute(src_feats), axis=1) != 0)
+
+            if feat_len > 0:
+                src_x = np.mean(src_feats[:feat_len, 0])
+                src_y = np.mean(src_feats[:feat_len, 1])
+
+                for idx, dest_id in enumerate(s_next[src_id]):
+                    edge_t = edge_type[src_id, idx]
+                    visited = evf_gt[src_id, idx]
+                    if 3 > edge_t > 0:
+
+                        dest_feats = node_feats[int(dest_id)]
+                        feat_len_dest = np.sum(np.sum(np.absolute(dest_feats), axis=1) != 0)
+                        dest_x = np.mean(dest_feats[:feat_len_dest, 0])
+                        dest_y = np.mean(dest_feats[:feat_len_dest, 1])
+                        d_x = dest_x - src_x
+                        d_y = dest_y - src_y
+
+                        line_style = '-' if edge_t == 1 else '--'
+                        width = 2 if visited else 0.005
+                        alpha = 1 if visited else 0.5
+
+                        plt.arrow(src_x, src_y, d_x, d_y, color='w', head_width=0.1, length_includes_head=True,
+                                  linestyle=line_style, width=width, alpha=alpha)
+
+        # Plot nodes
+        for node_id, node_feat in enumerate(node_feats):
+            feat_len = np.sum(np.sum(np.absolute(node_feat), axis=1) != 0)
+            if feat_len > 0:
+                visited = node_id in node_seq
+                x = np.mean(node_feat[:feat_len, 0])
+                y = np.mean(node_feat[:feat_len, 1])
+                yaw = np.arctan2(np.mean(np.sin(node_feat[:feat_len, 2])),
+                                 np.mean(np.cos(node_feat[:feat_len, 2])))
+                c = color_by_yaw(0, yaw)
+                c = np.asarray(c).reshape(-1, 3) / 255
+                s = 200 if visited else 50
+                ax.scatter(x, y, s, c=c)
+
+        plt.plot(fut_xy[:, 0], fut_xy[:, 1], color='r', lw=3)
+
+        plt.show()
+        return fig, ax
+
 
     def generate_nuscenes_gif(self, idcs: List[int]):
         """
@@ -112,6 +174,8 @@ class Visualizer:
         raster_maps = InputRepresentation(static_layer_rasterizer, agent_rasterizer, Rasterizer())
 
         imgs = []
+        imgs_fancy = []
+        graph_img = []
         for idx in idcs:
 
             # Load data
@@ -120,12 +184,37 @@ class Visualizer:
             i_t = data['inputs']['instance_token']
             s_t = data['inputs']['sample_token']
 
+            scene=self.ns.get('scene', self.ns.get('sample',s_t)['scene_token'])
+            scene_name=scene['name']
+            log=self.ns.get('log', scene['log_token'])
+            location = log['location']
+            nusc_map = NuScenesMap(dataroot=self.dataroot, map_name=location)
+            map_poses, fig2, ax2 = nusc_map.render_egoposes_on_fancy_map(self.ns, scene['token'])
+
+            sample_record = self.ns.get('sample', s_t)
+            sample_data_record = self.ns.get('sample_data', sample_record['data']['LIDAR_TOP'])
+            pose_record = self.ns.get('ego_pose', sample_data_record['ego_pose_token'])
+            # Retrieve ego history 
+            for history_t in reversed(range(4)):
+                prev_sample_data = self.ns.get('sample_data', sample_data_record['prev'])
+                history_name = 'history_' + str(history_t)
+                pose_record[history_name] = self.ns.get('ego_pose', prev_sample_data['ego_pose_token'])['translation']
+                pose_record[history_name].append(self.ns.get('ego_pose', prev_sample_data['ego_pose_token'])['rotation'])
+
+
             # Get raster map
-            hd_map = raster_maps.make_input_representation(i_t, s_t)
+            hd_map = raster_maps.make_input_representation(i_t, s_t, pose_record)
             r, g, b = hd_map[:, :, 0] / 255, hd_map[:, :, 1] / 255, hd_map[:, :, 2] / 255
             hd_map_gray = 0.2989 * r + 0.5870 * g + 0.1140 * b
 
             # Predict
+            if self.encoder_type == 'scout_encoder':
+                adj_matrix = data['inputs']['surrounding_agent_representation']['adj_matrix'][0].cpu()
+                len_adj = data['inputs']['surrounding_agent_representation']['len_adj']
+                adj_matrix = adj_matrix[:len_adj, :len_adj] 
+                graphs = dgl.from_scipy(spp.coo_matrix(adj_matrix)).int() 
+                data['inputs']['graphs'] = graphs
+
             predictions = self.model(data['inputs'])
 
             # Plot
@@ -134,11 +223,16 @@ class Visualizer:
             ax[1].imshow(hd_map_gray, cmap='gist_gray', extent=self.ds.map_extent)
             ax[2].imshow(hd_map_gray, cmap='gist_gray', extent=self.ds.map_extent)
 
+            fig3, ax3 = plt.subplots()
+
             for n, traj in enumerate(predictions['traj'][0]):
                 ax[1].plot(traj[:, 0].detach().cpu().numpy(), traj[:, 1].detach().cpu().numpy(), lw=4,
                            color='r', alpha=0.8)
                 ax[1].scatter(traj[-1, 0].detach().cpu().numpy(), traj[-1, 1].detach().cpu().numpy(), 60,
                               color='r', alpha=0.8)
+                self.visualize_graph(fig3,ax3,data['inputs']['map_representation']['lane_node_feats'][0].detach().cpu().numpy(), 
+                                        data['inputs']['map_representation']['s_next'][0].detach().cpu().numpy(), data['inputs']['map_representation']['edge_type'][0].detach().cpu().numpy(),
+                                        data['ground_truth']['evf_gt'][0].detach().cpu().numpy(), data['inputs']['node_seq_gt'][0].detach().cpu().numpy(), traj.detach().cpu().numpy())
 
             traj_gt = data['ground_truth']['traj'][0]
             ax[2].plot(traj_gt[:, 0].detach().cpu().numpy(), traj_gt[:, 1].detach().cpu().numpy(), lw=4, color='g')
@@ -158,4 +252,16 @@ class Visualizer:
             imgs.append(image_from_plot)
             plt.close(fig)
 
-        return imgs
+            fig2.canvas.draw()
+            image_from_plot = np.frombuffer(fig2.canvas.tostring_rgb(), dtype=np.uint8) 
+            image_from_plot = image_from_plot.reshape(fig2.canvas.get_width_height()[::-1] + (3,))
+            imgs_fancy.append(image_from_plot)
+            plt.close(fig2)
+
+            fig3.canvas.draw()
+            image_from_plot = np.frombuffer(fig3.canvas.tostring_rgb(), dtype=np.uint8) 
+            image_from_plot = image_from_plot.reshape(fig3.canvas.get_width_height()[::-1] + (3,))
+            graph_img.append(image_from_plot)
+            plt.close(fig3)
+
+        return imgs, imgs_fancy, graph_img
