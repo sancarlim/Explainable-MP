@@ -72,15 +72,15 @@ class PGP(PredictionAggregator):
         edge_type = encodings['edge_type']
 
         # Compute pi (log probs)
-        pi = self.compute_policy(target_agent_encoding, node_encodings, node_masks, s_next, edge_type)
+        pi = self.compute_policy(target_agent_encoding, node_encodings, node_masks, s_next, edge_type) # (batch_size, num_nodes, num_edges) [64 164 15]
 
         # If pretraining model, use ground truth node sequences
         if self.pre_train and self.training:
             sampled_traversals = encodings['node_seq_gt'].unsqueeze(1).repeat(1, self.num_samples, 1).long()
         else:
             # Sample pi
-            init_node = encodings['init_node']
-            sampled_traversals = self.sample_policy(torch.exp(pi), s_next, init_node)
+            init_node = encodings['init_node'] # [64, 164]
+            sampled_traversals = self.sample_policy(torch.exp(pi), s_next, init_node) # (batch_size, num_samples, horizon) [64 1000 15]
 
         # Selectively aggregate context along traversed paths
         agg_enc = self.aggregate(sampled_traversals, node_encodings, target_agent_encoding)
@@ -141,7 +141,7 @@ class PGP(PredictionAggregator):
             # Useful variables:
             batch_size = pi.shape[0]
             max_nodes = pi.shape[1]
-            batch_idcs = torch.arange(batch_size, device=device).unsqueeze(1).repeat(1, self.num_samples).view(-1)
+            batch_idcs = torch.arange(batch_size, device=device).unsqueeze(1).repeat(1, self.num_samples).view(-1) # 1000*batch_idx
 
             # Initialize output
             sampled_traversals = torch.zeros(batch_size, self.num_samples, self.horizon, device=device).long()
@@ -155,8 +155,8 @@ class PGP(PredictionAggregator):
             s_next = torch.cat((s_next, s_next_dummy), dim=1)
 
             # Sample initial node:
-            pi_s = init_node.unsqueeze(1).repeat(1, self.num_samples, 1).view(-1, max_nodes)
-            s = Categorical(pi_s).sample()
+            pi_s = init_node.unsqueeze(1).repeat(1, self.num_samples, 1).view(-1, max_nodes) # [64000 164] [batch*samples, max_nodes]
+            s = Categorical(pi_s).sample() # 64000
             sampled_traversals[:, :, 0] = s.reshape(batch_size, self.num_samples)
 
             # Sample traversed paths for a fixed horizon
@@ -166,7 +166,7 @@ class PGP(PredictionAggregator):
                 pi_s = pi[batch_idcs, s]
 
                 # Sample edges
-                a = Categorical(pi_s).sample()
+                a = Categorical(pi_s).sample() # 64000
 
                 # Look-up next node
                 s = s_next[batch_idcs, s, a].long()
@@ -198,9 +198,9 @@ class PGP(PredictionAggregator):
         dst_idcs = s_next[:, :, :-1].reshape(batch_size, -1).long()  # [B, max nodes * max nbrs]
         batch_idcs = torch.arange(batch_size).unsqueeze(1).repeat(1, max_nodes * max_nbrs)  # [B, max nodes * max nbrs]
         dst_node_enc = node_encodings[batch_idcs, dst_idcs].reshape(batch_size, max_nodes, max_nbrs, node_enc_size)
-        target_agent_enc = target_agent_encoding.unsqueeze(1).unsqueeze(2).repeat(1, max_nodes, max_nbrs, 1)  # [B, max nodes, max nbrs, target agent enc size]
+        target_agent_enc = target_agent_encoding.unsqueeze(1).unsqueeze(2).repeat(1, max_nodes, max_nbrs, 1)  # [B, max nodes, max nbrs, enc size]
         edge_enc = torch.cat((torch.as_tensor(edge_type[:, :, :-1] == 1, device=device).unsqueeze(3).float(),
-                              torch.as_tensor(edge_type[:, :, :-1] == 2, device=device).unsqueeze(3).float()), dim=3)
+                              torch.as_tensor(edge_type[:, :, :-1] == 2, device=device).unsqueeze(3).float()), dim=3) # cat(succ, prox)
         enc = torch.cat((target_agent_enc, src_node_enc, dst_node_enc, edge_enc), dim=3)
         enc_goal = torch.cat((target_agent_enc[:, :, 0, :], src_node_enc[:, :, 0, :]), dim=2)
 

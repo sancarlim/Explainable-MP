@@ -48,7 +48,7 @@ class LVM(PredictionDecoder):
         if type(inputs) is torch.Tensor:
             agg_encoding = inputs
         else:
-            agg_encoding = inputs['agg_encoding']
+            agg_encoding = inputs['agg_encoding'] # [64,100,160]
 
         if self.agg_type == 'combined':
             agg_encoding = agg_encoding.unsqueeze(1).repeat(1, self.num_samples, 1)
