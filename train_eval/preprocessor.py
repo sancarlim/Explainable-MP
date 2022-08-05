@@ -7,7 +7,7 @@ import pickle
 from train_eval.initialization import get_specific_args, initialize_dataset
 
 
-def preprocess_data(cfg: Dict, data_root: str, data_dir: str, compute_stats=False, extract=True):
+def preprocess_data(cfg: Dict, data_root: str, data_dir: str, compute_stats=True, extract=True):
     """
     Main function for pre-processing data
 
@@ -22,7 +22,7 @@ def preprocess_data(cfg: Dict, data_root: str, data_dir: str, compute_stats=Fals
     ds_type = cfg['dataset'] + '_' + cfg['agent_setting'] + '_' + cfg['input_representation']
 
     # Get dataset specific args
-    specific_args = get_specific_args(cfg['dataset'], data_root, cfg['version'] if 'version' in cfg.keys() else None)
+    specific_args = get_specific_args(cfg['dataset'], data_root, cfg['version'] if 'version' in cfg.keys() else None)[0]
 
     # Compute stats
     if compute_stats:

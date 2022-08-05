@@ -56,7 +56,8 @@ def get_specific_args(dataset_name: str, data_root: str, version: str = None) ->
     if dataset_name == 'nuScenes':
         ns = NuScenes(version, dataroot=data_root)
         pred_helper = PredictHelper(ns)
-        specific_args.append(pred_helper)
+        specific_args.append([pred_helper])
+        specific_args.append([ns])
 
     return specific_args
 

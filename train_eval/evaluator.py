@@ -31,7 +31,7 @@ class Evaluator:
 
         # Initialize dataset
         ds_type = cfg['dataset'] + '_' + cfg['agent_setting'] + '_' + cfg['input_representation']
-        spec_args = get_specific_args(cfg['dataset'], data_root, cfg['version'] if 'version' in cfg.keys() else None)
+        spec_args = get_specific_args(cfg['dataset'], data_root, cfg['version'] if 'version' in cfg.keys() else None)[0]
         test_set = initialize_dataset(ds_type, ['load_data', data_dir, cfg['test_set_args']] + spec_args)
 
         # Initialize dataloader
