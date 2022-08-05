@@ -18,7 +18,7 @@ class Trainer:
     """
     Trainer class for running train-val loops
     """
-    def __init__(self, cfg: Dict, data_root: str, data_dir: str, checkpoint_path=None, just_weights=False, writer=None):
+    def __init__(self, cfg: Dict, data_root: str, data_dir: str, checkpoint_path=None, just_weights=False, writer=None, wandb_writer=None):
         """
         Initialize trainer object
         :param cfg: Configuration parameters
@@ -31,7 +31,7 @@ class Trainer:
 
         # Initialize datasets:
         ds_type = cfg['dataset'] + '_' + cfg['agent_setting'] + '_' + cfg['input_representation']
-        spec_args = get_specific_args(cfg['dataset'], data_root, cfg['version'] if 'version' in cfg.keys() else None)
+        spec_args = get_specific_args(cfg['dataset'], data_root, cfg['version'] if 'version' in cfg.keys() else None)[0]
         train_set = initialize_dataset(ds_type, ['load_data', data_dir, cfg['train_set_args']] + spec_args)
         val_set = initialize_dataset(ds_type, ['load_data', data_dir, cfg['val_set_args']] + spec_args)
         datasets = {'train': train_set, 'val': val_set}
@@ -77,6 +77,8 @@ class Trainer:
         # Initialize tensorboard writer
         self.writer = writer
         self.tb_iters = 0
+        
+        self.wandb_writer = wandb_writer
 
         # Load checkpoint if checkpoint path is provided
         if checkpoint_path is not None:
@@ -171,7 +173,7 @@ class Trainer:
 
             # Log minibatch metrics to tensorboard during training
             if mode == 'train':
-                self.log_tensorboard_train(minibatch_metrics)
+                self.log_tensorboard_train(minibatch_metrics) 
 
             # Display metrics at a predefined frequency
             if i % self.log_period == self.log_period - 1:
@@ -179,7 +181,7 @@ class Trainer:
 
         # Log val metrics for the complete epoch to tensorboard
         if mode == 'val':
-            self.log_tensorboard_val(epoch_metrics)
+            self.log_tensorboard_val(epoch_metrics) 
 
         return epoch_metrics
 
@@ -282,12 +284,14 @@ class Trainer:
             'min_val_metric': self.min_val_metric
         }, checkpoint_path)
 
+
     def log_tensorboard_train(self, minibatch_metrics: Dict):
         """
         Logs minibatch metrics during training
         """
         for metric_name, metric_val in minibatch_metrics.items():
             self.writer.add_scalar('train/' + metric_name, metric_val, self.tb_iters)
+            self.wandb_writer.log({'train/'+ metric_name: metric_val, 'epoch': self.current_epoch, 'batch': self.tb_iters}) 
         self.tb_iters += 1
 
     def log_tensorboard_val(self, epoch_metrics):
@@ -298,3 +302,5 @@ class Trainer:
             if metric_name != 'minibatch_count' and metric_name != 'time_elapsed':
                 metric_val /= epoch_metrics['minibatch_count']
                 self.writer.add_scalar('val/' + metric_name, metric_val, self.tb_iters)
+                self.wandb_writer.log({'val/' + metric_name: metric_val, 'epoch': self.current_epoch, 'batch': self.tb_iters})
+

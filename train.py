@@ -3,6 +3,7 @@ import yaml
 from train_eval.trainer import Trainer
 from torch.utils.tensorboard import SummaryWriter
 import os
+import wandb
 
 # Parse arguments
 parser = argparse.ArgumentParser()
@@ -32,9 +33,12 @@ with open(args.config, 'r') as yaml_file:
 # Initialize tensorboard writer
 writer = SummaryWriter(log_dir=os.path.join(args.output_dir, 'tensorboard_logs'))
 
+# Initialize wandb loger
+wandb_logger = wandb.init(job_type="training", entity='sandracl72', project='nuscenes_pgp',
+                            config=cfg, sync_tensorboard=True, name=cfg['name']) 
 
 # Train
-trainer = Trainer(cfg, args.data_root, args.data_dir, checkpoint_path=args.checkpoint, writer=writer)
+trainer = Trainer(cfg, args.data_root, args.data_dir, checkpoint_path=args.checkpoint, writer=writer, wandb_writer=wandb_logger)
 trainer.train(num_epochs=int(args.num_epochs), output_dir=args.output_dir)
 
 
