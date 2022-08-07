@@ -20,6 +20,7 @@ from pyquaternion import Quaternion
 from nuscenes.eval.common.utils import quaternion_yaw 
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 import math
+import time
 
 # Initialize device:
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -27,7 +28,7 @@ patch_margin = 50
 min_diff_patch = 50
 ego_car = plt.imread('/media/14TBDISK/sandra//DBU_Graph/NuScenes/icons/Car TOP_VIEW ROBOT.png')
 agent = plt.imread('/media/14TBDISK/sandra/DBU_Graph/NuScenes/icons/Car TOP_VIEW 375397.png')
-cars = plt.imread('/media/14TBDISK/sandra/DBU_Graph/NuScenes/icons/Car TOP_VIEW F05F78.png') 
+cars = plt.imread('/media/14TBDISK/sandra/DBU_Graph/NuScenes/icons/Car TOP_VIEW 80CBE5.png') 
 
 layers = ['drivable_area',
           'road_segment',
@@ -73,6 +74,26 @@ class Visualizer:
         checkpoint = torch.load(checkpoint_path)
         self.model.load_state_dict(checkpoint['model_state_dict'])
 
+
+        # Raster maps for visualization.
+        map_extent = self.ds.map_extent
+        resolution = 0.1
+        static_layer_rasterizer = StaticLayerRasterizer(self.ds.helper,
+                                                        resolution=resolution,
+                                                        meters_ahead=map_extent[3],
+                                                        meters_behind=-map_extent[2],
+                                                        meters_left=-map_extent[0],
+                                                        meters_right=map_extent[1])
+
+        agent_rasterizer = AgentBoxesWithFadedHistory(self.ds.helper, seconds_of_history=1,
+                                                      resolution=resolution,
+                                                      meters_ahead=map_extent[3],
+                                                      meters_behind=-map_extent[2],
+                                                      meters_left=-map_extent[0],
+                                                      meters_right=map_extent[1])
+
+        self.raster_maps = InputRepresentation(static_layer_rasterizer, agent_rasterizer, Rasterizer())
+
     def visualize(self, output_dir: str, dataset_type: str):
         """
         Generate visualizations for predictions
@@ -87,14 +108,16 @@ class Visualizer:
         index_list = self.get_vis_idcs_nuscenes()
         if not os.path.isdir(os.path.join(output_dir, 'results', 'gifs')):
             os.mkdir(os.path.join(output_dir, 'results', 'gifs'))
+        start = time.time()
         for n, indices in enumerate(index_list):
-            imgs, fancy_img, graph_img = self.generate_nuscenes_gif(indices)
-            filename = os.path.join(output_dir, 'results', 'gifs', 'example' + str(n) + '.gif')
-            imageio.mimsave(filename, imgs, format='GIF', fps=2)
-            filename = os.path.join(output_dir, 'results', 'gifs', 'example' + str(n) + '_fancy.gif')
+            imgs, fancy_img, graph_img, scene = self.generate_nuscenes_gif(indices)
+            filename = os.path.join(output_dir, 'results', 'gifs', 'example' + str(n) + scene  + '_fancy.gif')
             imageio.mimsave(filename, fancy_img, format='GIF', fps=2)
-            filename = os.path.join(output_dir, 'results', 'gifs', 'example' + str(n) + '_graph.gif')
-            imageio.mimsave(filename, graph_img, format='GIF', fps=2)
+            """ filename = os.path.join(output_dir, 'results', 'gifs', 'example' + str(n) + scene + '.gif')
+            imageio.mimsave(filename, imgs, format='GIF', fps=2) 
+            filename = os.path.join(output_dir, 'results', 'gifs', 'example' + str(n) + scene  + '_graph.gif')
+            imageio.mimsave(filename, graph_img, format='GIF', fps=2) """
+            print('Saved gif for example ' + str(n) + ' in ' + str(time.time() - start) + ' seconds')
 
     def get_vis_idcs_nuscenes(self):
         """
@@ -175,27 +198,6 @@ class Visualizer:
         Generates gif of predictions for the given set of indices.
         :param idcs: val set indices corresponding to a particular instance token.
         """
-
-        # Raster maps for visualization.
-        map_extent = self.ds.map_extent
-        resolution = 0.1
-        static_layer_rasterizer = StaticLayerRasterizer(self.ds.helper,
-                                                        resolution=resolution,
-                                                        meters_ahead=map_extent[3],
-                                                        meters_behind=-map_extent[2],
-                                                        meters_left=-map_extent[0],
-                                                        meters_right=map_extent[1])
-
-        agent_rasterizer = AgentBoxesWithFadedHistory(self.ds.helper, seconds_of_history=1,
-                                                      resolution=resolution,
-                                                      meters_ahead=map_extent[3],
-                                                      meters_behind=-map_extent[2],
-                                                      meters_left=-map_extent[0],
-                                                      meters_right=map_extent[1])
-
-        raster_maps = InputRepresentation(static_layer_rasterizer, agent_rasterizer, Rasterizer())
-
-
         s_t = self.ds[idcs[0]]['inputs']['sample_token']
         scene=self.ns.get('scene', self.ns.get('sample',s_t)['scene_token'])
         scene_name=scene['name']
@@ -203,6 +205,7 @@ class Visualizer:
         location = log['location']
         nusc_map = NuScenesMap(dataroot=self.dataroot, map_name=location)
 
+        
         imgs = []
         imgs_fancy = []
         graph_img = []
@@ -223,11 +226,11 @@ class Visualizer:
             pose_record = self.ns.get('ego_pose', sample_data_record['ego_pose_token'])
             ego_poses=np.array(pose_record['translation'][:2])
             # Retrieve ego history 
-            for history_t in reversed(range(4)):
+            """ for history_t in reversed(range(4)):
                 prev_sample_data = self.ns.get('sample_data', sample_data_record['prev'])
                 history_name = 'history_' + str(history_t)  
                 pose_record[history_name] = self.ns.get('ego_pose', prev_sample_data['ego_pose_token'])['translation']
-                pose_record[history_name].append(self.ns.get('ego_pose', prev_sample_data['ego_pose_token'])['rotation'])
+                pose_record[history_name].append(self.ns.get('ego_pose', prev_sample_data['ego_pose_token'])['rotation']) """
 
             # Render the map patch with the current ego poses.
             min_patch = np.floor(ego_poses - patch_margin)
@@ -243,6 +246,11 @@ class Visualizer:
             fig2, ax2 = nusc_map.render_map_patch(my_patch, layers, figsize=(10, 10), alpha=0.3,
                                         render_egoposes_range=False,
                                         render_legend=True, bitmap=None)
+
+            cmap_cool = plt.get_cmap('cool')
+            sm_cool = plt.cm.ScalarMappable(cmap=cmap_cool , norm=plt.Normalize(vmin=0, vmax=1)) 
+            cbar_cool = plt.colorbar(sm_cool)
+            cbar_cool.set_label('Probability of each cluster', rotation=270)
                                         
             r_img = rotate(ego_car, quaternion_yaw(Quaternion(pose_record['rotation']))*180/math.pi,reshape=True)
             oi = OffsetImage(r_img, zoom=0.02, zorder=500)
@@ -268,6 +276,8 @@ class Visualizer:
                 node_circle_size=0.3
                 circle_edge_width=0.5
                 if ann['instance_token'] == i_t:
+                    agent_translation = ann['translation']
+                    agent_rotation = ann['rotation']
                     r_img = rotate(agent, quaternion_yaw(Quaternion(ann['rotation']))*180/math.pi,reshape=True)
                     oi = OffsetImage(r_img, zoom=0.01, zorder=500)
                     veh_box = AnnotationBbox(oi, (history[-1, 0], history[-1, 1]), frameon=False)
@@ -299,9 +309,9 @@ class Visualizer:
                     ax2.add_artist(circle)
 
             # Get raster map
-            hd_map = raster_maps.make_input_representation(i_t, s_t, pose_record)
+            """ hd_map = self.raster_maps.make_input_representation(i_t, s_t, pose_record)
             r, g, b = hd_map[:, :, 0] / 255, hd_map[:, :, 1] / 255, hd_map[:, :, 2] / 255
-            hd_map_gray = 0.2989 * r + 0.5870 * g + 0.1140 * b
+            hd_map_gray = 0.2989 * r + 0.5870 * g + 0.1140 * b """
 
             # Predict
             if self.encoder_type == 'scout_encoder':
@@ -314,26 +324,26 @@ class Visualizer:
             predictions = self.model(data['inputs'])
 
             # Plot
-            fig, ax = plt.subplots(1, 3, figsize=(15, 5))
+            """ fig, ax = plt.subplots(1, 3, figsize=(15, 5))
             ax[0].imshow(hd_map, extent=self.ds.map_extent)
             ax[1].imshow(hd_map_gray, cmap='gist_gray', extent=self.ds.map_extent)
-            ax[2].imshow(hd_map_gray, cmap='gist_gray', extent=self.ds.map_extent)
+            ax[2].imshow(hd_map_gray, cmap='gist_gray', extent=self.ds.map_extent) """
 
             fig3, ax3 = plt.subplots()
 
             for n, traj in enumerate(predictions['traj'][0]):
-                ax[1].plot(traj[:, 0].detach().cpu().numpy(), traj[:, 1].detach().cpu().numpy(), lw=4,
+                """ ax[1].plot(traj[:, 0].detach().cpu().numpy(), traj[:, 1].detach().cpu().numpy(), lw=4,
                            color='r', alpha=0.8)
                 ax[1].scatter(traj[-1, 0].detach().cpu().numpy(), traj[-1, 1].detach().cpu().numpy(), 60,
-                              color='r', alpha=0.8)
-                global_traj = convert_local_coords_to_global(traj.detach().cpu().numpy(), pose_record['translation'], pose_record['rotation'])
-                ax2.plot(global_traj[:, 0], global_traj[:, 1], '-bo', lw=4, markersize=2, linestyle = '--', alpha=0.8) 
+                              color='r', alpha=0.8) """
+                global_traj = convert_local_coords_to_global(traj.detach().cpu().numpy(), agent_translation, agent_rotation)
+                ax2.plot(global_traj[:, 0], global_traj[:, 1], color=cmap_cool(4*predictions['probs'][0][n].detach().cpu().numpy()), lw=max(1,7*predictions['probs'][0][n]), linestyle = '--', alpha=0.8) 
                 
-                self.visualize_graph(fig3,ax3,data['inputs']['map_representation']['lane_node_feats'][0].detach().cpu().numpy(), 
+                """ self.visualize_graph(fig3,ax3,data['inputs']['map_representation']['lane_node_feats'][0].detach().cpu().numpy(), 
                                         data['inputs']['map_representation']['s_next'][0].detach().cpu().numpy(), data['inputs']['map_representation']['edge_type'][0].detach().cpu().numpy(),
-                                        data['ground_truth']['evf_gt'][0].detach().cpu().numpy(), data['inputs']['node_seq_gt'][0].detach().cpu().numpy(), traj.detach().cpu().numpy())
+                                        data['ground_truth']['evf_gt'][0].detach().cpu().numpy(), data['inputs']['node_seq_gt'][0].detach().cpu().numpy(), traj.detach().cpu().numpy()) """
 
-            traj_gt = data['ground_truth']['traj'][0]
+            """ traj_gt = data['ground_truth']['traj'][0]
             ax[2].plot(traj_gt[:, 0].detach().cpu().numpy(), traj_gt[:, 1].detach().cpu().numpy(), lw=4, color='g')
             ax[2].scatter(traj_gt[-1, 0].detach().cpu().numpy(), traj_gt[-1, 1].detach().cpu().numpy(), 60, color='g')
 
@@ -349,7 +359,7 @@ class Visualizer:
             image_from_plot = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
             image_from_plot = image_from_plot.reshape(fig.canvas.get_width_height()[::-1] + (3,))
             imgs.append(image_from_plot)
-            plt.close(fig)
+            plt.close(fig)"""
 
             fig2.canvas.draw()
             image_from_plot = np.frombuffer(fig2.canvas.tostring_rgb(), dtype=np.uint8) 
@@ -357,10 +367,10 @@ class Visualizer:
             imgs_fancy.append(image_from_plot)
             plt.close(fig2)
 
-            fig3.canvas.draw()
+            """ fig3.canvas.draw()
             image_from_plot = np.frombuffer(fig3.canvas.tostring_rgb(), dtype=np.uint8) 
             image_from_plot = image_from_plot.reshape(fig3.canvas.get_width_height()[::-1] + (3,))
             graph_img.append(image_from_plot)
-            plt.close(fig3)
+            plt.close(fig3) """
 
-        return imgs, imgs_fancy, graph_img
+        return imgs, imgs_fancy, graph_img, scene_name
