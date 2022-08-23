@@ -1,6 +1,6 @@
 import matplotlib.pyplot as plt
 from datasets.nuScenes.nuScenes_vector import NuScenesVector
-from nuscenes.prediction.input_representation.static_layers import color_by_yaw
+from nuscenes.prediction.input_representation.static_layers import correct_yaw , get_lanes_for_agent 
 from nuscenes.map_expansion.map_api import NuScenesMap
 from nuscenes.prediction import PredictHelper
 import numpy as np
@@ -84,6 +84,10 @@ class NuScenesGraphs(NuScenesVector):
         # Get agent representation in global co-ordinates
         global_pose = self.get_target_agent_global_pose(idx)
 
+        # Get path candidates
+        paths_ids = {i_t: get_lanes_for_agent(global_pose[0],global_pose[1],global_pose[2],map_api)[0] } 
+        paths_vectors = self.get_path(paths_ids[i_t], map_api)
+
         # Get lanes around agent within map_extent
         lanes = self.get_lanes_around_agent(global_pose, map_api)
 
@@ -128,7 +132,9 @@ class NuScenesGraphs(NuScenesVector):
             'lane_node_feats': lane_node_feats,
             'lane_node_masks': lane_node_masks,
             's_next': s_next,
-            'edge_type': edge_type
+            'edge_type': edge_type,
+            'paths_ids': paths_ids,
+            'path_candidates': paths_vectors
         }
 
         return map_representation

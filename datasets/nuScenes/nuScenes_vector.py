@@ -1,6 +1,7 @@
 from datasets.nuScenes.nuScenes import NuScenesTrajectories
-from nuscenes.prediction.input_representation.static_layers import correct_yaw
+from nuscenes.prediction.input_representation.static_layers import correct_yaw , get_lanes_for_agent
 from nuscenes.map_expansion.map_api import NuScenesMap
+from nuscenes.map_expansion.arcline_path_utils import compute_segment_sign
 from nuscenes.eval.common.utils import quaternion_yaw
 from pyquaternion import Quaternion
 from nuscenes.prediction import PredictHelper
@@ -102,6 +103,47 @@ class NuScenesVector(NuScenesTrajectories):
 
         return hist
 
+    def get_path(self, paths_ids, map_api, origin=None):
+        lane_vector_paths = []
+        for i, lane_candidate in enumerate(paths_ids):
+            lane_dict = {}
+            lane_points = map_api.discretize_lanes([lane_candidate]+[out for out in paths_ids[lane_candidate]], resolution_meters=1)  # { lane: [x,y,yaw], outgoing1:[], ... }
+            if origin != None: 
+                for lane in lane_points:
+                    points = np.array(lane_points[lane])
+                    if len(points.shape) != 2:
+                        continue
+                    lane_points[lane] = [self.global_to_local(origin, (pose[0], pose[1], 0)) for pose in points[:,:2] ]
+            arcline_path = map_api.get_arcline_path(lane_candidate)[0]
+            arc_vector = list(arcline_path.values())
+            arc_vector[2] = list(compute_segment_sign(arcline_path)) 
+            arc_vector[3] = [1/arc_vector[3]] # compute curvature 
+            arc_vector.insert(0,[i,0]) # path number, lane number (0)
+            arc_vector=np.concatenate(arc_vector)
+            lane_vector = [np.concatenate((np.array(point[:2]), arc_vector)) for point in lane_points[lane_candidate] ]
+            lane_vector_paths.extend(lane_vector)
+
+            lane_dict['outgoing_arcline_path'] = []
+            # Candidates for lanes in current position
+            for outgoing in paths_ids[lane_candidate]:  
+                try:
+                    lane_dict['outgoing_arcline_path'].append(map_api.get_arcline_path(outgoing)[0]) 
+                except:
+                    pass 
+            
+            for nout, out_arc in enumerate(lane_dict['outgoing_arcline_path']):
+                out_token = paths_ids[lane_candidate][nout]
+                out_vector = list(out_arc.values())
+                out_vector[2] =  list(compute_segment_sign(out_arc))
+                out_vector[3] = [1/out_vector[3]] # compute curvature 
+                out_vector.insert(0,[i,nout+1]) # number of lane in path
+                out_vector_cat = np.concatenate(out_vector.copy()) 
+                lane_points_out = np.array(lane_points[out_token])[:,:2]
+                lane_vector = np.concatenate((lane_vector, np.array([np.concatenate((np.array(point), out_vector_cat)) for point in lane_points_out])))
+                lane_vector_paths.extend([np.concatenate((np.array(point), out_vector_cat)) for point in lane_points_out])            
+
+        return lane_vector_paths
+        
     def get_map_representation(self, idx: int) -> Union[int, Dict]:
         """
         Extracts map representation
@@ -115,6 +157,10 @@ class NuScenesVector(NuScenesTrajectories):
 
         # Get agent representation in global co-ordinates
         global_pose = self.get_target_agent_global_pose(idx)
+
+        # Get path candidates
+        paths_ids = {i_t: get_lanes_for_agent(global_pose,map_api)[0] } 
+        paths_vectors = self.get_path(paths_ids, map_api)
 
         # Get lanes around agent within map_extent (80m)
         lanes = self.get_lanes_around_agent(global_pose, map_api)
@@ -141,7 +187,9 @@ class NuScenesVector(NuScenesTrajectories):
 
         map_representation = {
             'lane_node_feats': lane_node_feats,
-            'lane_node_masks': lane_node_masks
+            'lane_node_masks': lane_node_masks,
+            'paths_ids': paths_ids,
+            'path_candidates': paths_vectors
         }
 
         return map_representation
@@ -155,11 +203,12 @@ class NuScenesVector(NuScenesTrajectories):
         """
 
         # Get vehicles and pedestrian histories for current sample
-        vehicles = self.get_agents_of_type(idx, 'vehicle')
-        pedestrians = self.get_agents_of_type(idx, 'human')
+        vehicles, paths_ids_v, paths_vectors_v = self.get_agents_of_type(idx, 'vehicle')
+        pedestrians,_,_ = self.get_agents_of_type(idx, 'human')
 
         # Discard poses outside map extent
         vehicles = self.discard_poses_outside_extent(vehicles)
+        paths_vectors_v = self.discard_poses_outside_extent(paths_vectors_v)
         pedestrians = self.discard_poses_outside_extent(pedestrians)
 
         # While running the dataset class in 'compute_stats' mode:
@@ -168,7 +217,9 @@ class NuScenesVector(NuScenesTrajectories):
 
         # Convert to fixed size arrays for batching
         vehicles, vehicle_masks = self.list_to_tensor(vehicles, self.max_vehicles, self.t_h * 2 + 1, 5)
-        pedestrians, pedestrian_masks = self.list_to_tensor(pedestrians, self.max_pedestrians, self.t_h * 2 + 1, 5)
+        pedestrians, pedestrian_masks = self.list_to_tensor(pedestrians, self.max_pedestrians, self.t_h * 2 + 1, 5) 
+        max_length = max([len(array) for array in paths_vectors_v])
+        paths_vectors_v, paths_vectors_v_masks = self.list_to_tensor(paths_vectors_v, self.max_vehicles, max_length , 17)
 
         # Get adjacency matrix
         adj_matrix, len_adj = self.get_adj_matrix(vehicles,vehicle_masks.any(-1),pedestrians,pedestrian_masks.any(-1))
@@ -182,7 +233,8 @@ class NuScenesVector(NuScenesTrajectories):
             'pedestrians': pedestrians,
             'pedestrian_masks': pedestrian_masks,
             'adj_matrix': adj_matrix,  
-            'len_adj': len_adj
+            'len_adj': len_adj,  
+            'path_candidates': paths_vectors_v
         }
 
         return surrounding_agent_representation
@@ -311,6 +363,8 @@ class NuScenesVector(NuScenesTrajectories):
         :return: list of ndarrays of agent track histories.
         """
         i_t, s_t = self.token_list[idx].split("_")
+        map_name = self.helper.get_map_name_from_sample_token(s_t)
+        map_api = self.maps[map_name]
 
         # Get agent representation in global co-ordinates
         origin = self.get_target_agent_global_pose(idx)
@@ -333,13 +387,23 @@ class NuScenesVector(NuScenesTrajectories):
         # Filter for agent type
         agent_list = []
         agent_i_ts = []
+        agent_yaw = []
         for k, v in agent_details.items():
             if v and agent_type in v[0]['category_name'] and v[0]['instance_token'] != i_t:
                 agent_list.append(agent_hist[k])
                 agent_i_ts.append(v[0]['instance_token'])
+                yaw = quaternion_yaw(Quaternion(agent_details[v[0]['instance_token']][0]['rotation']))
+                yaw = correct_yaw(yaw)
+                agent_yaw.append(yaw)
 
         # Convert to target agent's frame of reference
-        for agent in agent_list:
+        paths_ids = {}
+        paths_vectors = []
+        for k, agent in enumerate(agent_list):
+            if 'vehicle' in agent_type:
+                # Get path candidates for vehicles
+                paths_ids[agent_i_ts[k]] = get_lanes_for_agent(agent[0][0],agent[0][1],agent_yaw[k],map_api)[0] 
+                paths_vectors.append(self.get_path(paths_ids[agent_i_ts[k]], map_api, origin))
             for n, pose in enumerate(agent):
                 local_pose = self.global_to_local(origin, (pose[0], pose[1], 0))
                 agent[n] = np.asarray([local_pose[0], local_pose[1]])
@@ -350,8 +414,8 @@ class NuScenesVector(NuScenesTrajectories):
             motion_states = self.get_past_motion_states(agent_i_ts[n], s_t)
             motion_states = motion_states[-len(xy):, :]
             agent_list[n] = np.concatenate((xy, motion_states), axis=1)
-
-        return agent_list
+        
+        return agent_list, paths_ids, paths_vectors
 
     def discard_poses_outside_extent(self, pose_set: List[np.ndarray],
                                      ids: List[str] = None) -> Union[List[np.ndarray],
