@@ -443,7 +443,7 @@ class SCOUTEncoder(PredictionEncoder):
             sum+=len_nbr-1 """
         
         # Agent interaction (agent||veh_nbr||ped_nbr [32,162,32]-» agent_nbr_context) ! 
-        interaction_graph = inputs['graphs'].to(target_agent_feats.device)
+        interaction_graph = inputs['interaction_graphs'].to(target_agent_feats.device)
         #dst = inputs['surrounding_agent_representation']['dst_nodes']
         #interaction_graph = dgl.graph((src, dst))  
         interaction_graph.create_formats_()
@@ -459,13 +459,21 @@ class SCOUTEncoder(PredictionEncoder):
         # nbr_vehicle_enc = torch.cat((nbr_vehicle_enc, agent_nbr_context[1:1+nbr_vehicle_enc.shape[0]]), dim=-1)
         # nbr_ped_enc = torch.cat((nbr_ped_enc, agent_nbr_context[1+nbr_vehicle_enc.shape[0]:]), dim=-1) 
 
-        # Encode lane nodes
+        # Encode lane nodes 
+        lanes_graphs = inputs['lanes_graphs'].to(target_agent_feats.device).create_formats_()
         lane_node_feats = inputs['map_representation']['lane_node_feats']
         lane_node_masks = inputs['map_representation']['lane_node_masks'] 
         lane_node_enc = self.lane_node_emb(lane_node_feats, lane_node_masks)  
+        
 
+        # Build adjacency matrix for heterograph - treating succ and prox edges separately and directional 
+        lanes_adj_matrix = self.build_adj_mat_directional_with_types(inputs['map_representation']['s_next'], inputs['map_representation']['edge_type'])
+        lanes_heterograph = [dgl.from_scipy(spp.coo_matrix(adj)).int() for adj in lanes_adj_matrix.cpu().numpy()]
+        batched_graph = dgl.batch(lanes_heterograph)
+        
+        
        
-        # Agent-node attention (between nbrs and lanes)
+        # Agent-node attention (between nbrs and lanes)  
         veh_interaction_feats = torch.cuda.FloatTensor(interaction_feats.shape[0],nbr_vehicle_feats.shape[1], interaction_feats.shape[-1])
         ped_interaction_feats = torch.cuda.FloatTensor(interaction_feats.shape[0],nbr_ped_feats.shape[1], interaction_feats.shape[-1]) 
         for i, batch in enumerate(interaction_feats): 
@@ -479,10 +487,11 @@ class SCOUTEncoder(PredictionEncoder):
         att_op, _ = self.a_n_att(queries, keys, vals, attn_mask=attn_masks)
         att_op = att_op.permute(1, 0, 2)
 
-        # Concatenate with original node encodings and 1x1 conv
+        # Concatenate with original node encodings and 1x1 conv 
         lane_node_enc = self.leaky_relu(self.mix(torch.cat((lane_node_enc, att_op), dim=2)))
 
         # GAT layers
+        # Build adj matrix - treat succ and prox edges as equivalent and bidirectional
         adj_mat = self.build_adj_mat(inputs['map_representation']['s_next'], inputs['map_representation']['edge_type'])
         for gat_layer in self.gat:
             lane_node_enc += gat_layer(lane_node_enc, adj_mat)
@@ -544,8 +553,6 @@ class SCOUTEncoder(PredictionEncoder):
 
         return input
 
-
-
     @staticmethod
     def build_adj_mat(s_next, edge_type):
         """
@@ -556,13 +563,13 @@ class SCOUTEncoder(PredictionEncoder):
         max_edges = s_next.shape[2]
         adj_mat = torch.diag(torch.ones(max_nodes, device=device)).unsqueeze(0).repeat(batch_size, 1, 1).bool()
 
-        dummy_vals = torch.arange(max_nodes, device=device).unsqueeze(0).unsqueeze(2).repeat(batch_size, 1, max_edges)
+        dummy_vals = torch.arange(max_nodes, device=device).unsqueeze(0).unsqueeze(2).repeat(batch_size, 1, max_edges) # B, 164, 15 - src indices
         dummy_vals = dummy_vals.float()
-        s_next[edge_type == 0] = dummy_vals[edge_type == 0]
+        s_next[edge_type == 0] = dummy_vals[edge_type == 0] # set to 0 for non-edges
         batch_indices = torch.arange(batch_size).unsqueeze(1).unsqueeze(2).repeat(1, max_nodes, max_edges)
         src_indices = torch.arange(max_nodes).unsqueeze(0).unsqueeze(2).repeat(batch_size, 1, max_edges)
         adj_mat[batch_indices[:, :, :-1], src_indices[:, :, :-1], s_next[:, :, :-1].long()] = True
-        adj_mat = adj_mat | torch.transpose(adj_mat, 1, 2)
+        adj_mat = adj_mat | torch.transpose(adj_mat, 1, 2) # bidirectional 
 
         return adj_mat
 

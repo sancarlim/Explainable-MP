@@ -103,6 +103,16 @@ class NuScenesVector(NuScenesTrajectories):
 
         return hist
 
+    def get_lanes_for_agent(self, x: float, y: float, yaw: float, 
+                        map_api: NuScenesMap) -> Dict[str, List[Tuple[float, float, float]]]:
+        lanes, no_lane = map_api.get_closest_lane(x, y, yaw)
+        # [N lanes, [n outgoing lanes per candidate lane]]
+        candidates_paths = {}
+        if len(lanes) != 0:
+            for lane in lanes:
+                candidates_paths[lane] = map_api.get_outgoing_lane_ids(lane)
+        return candidates_paths
+
     def get_path(self, paths_ids, map_api, origin=None):
         lane_vector_paths = []
         for i, lane_candidate in enumerate(paths_ids):
@@ -159,8 +169,8 @@ class NuScenesVector(NuScenesTrajectories):
         global_pose = self.get_target_agent_global_pose(idx)
 
         # Get path candidates
-        paths_ids = {i_t: get_lanes_for_agent(global_pose,map_api)[0] } 
-        paths_vectors = self.get_path(paths_ids, map_api)
+        # paths_ids = {i_t: self.get_lanes_for_agent(global_pose,map_api)[0] } 
+        # paths_vectors = self.get_path(paths_ids, map_api)
 
         # Get lanes around agent within map_extent (80m)
         lanes = self.get_lanes_around_agent(global_pose, map_api)
@@ -188,8 +198,8 @@ class NuScenesVector(NuScenesTrajectories):
         map_representation = {
             'lane_node_feats': lane_node_feats,
             'lane_node_masks': lane_node_masks,
-            'paths_ids': paths_ids,
-            'path_candidates': paths_vectors
+            # 'paths_ids': paths_ids,
+            # 'path_candidates': paths_vectors
         }
 
         return map_representation
@@ -203,12 +213,13 @@ class NuScenesVector(NuScenesTrajectories):
         """
 
         # Get vehicles and pedestrian histories for current sample
-        vehicles, paths_ids_v, paths_vectors_v = self.get_agents_of_type(idx, 'vehicle')
-        pedestrians,_,_ = self.get_agents_of_type(idx, 'human')
+        vehicles  = self.get_agents_of_type(idx, 'vehicle')
+        # paths_ids_v, paths_vectors_v = self.split_lanes(paths_vectors_v, self.polyline_length, paths_ids_v)
+        pedestrians = self.get_agents_of_type(idx, 'human')
 
         # Discard poses outside map extent
         vehicles = self.discard_poses_outside_extent(vehicles)
-        paths_vectors_v = self.discard_poses_outside_extent(paths_vectors_v)
+        # paths_vectors_v = self.discard_poses_outside_extent(paths_vectors_v)
         pedestrians = self.discard_poses_outside_extent(pedestrians)
 
         # While running the dataset class in 'compute_stats' mode:
@@ -218,8 +229,8 @@ class NuScenesVector(NuScenesTrajectories):
         # Convert to fixed size arrays for batching
         vehicles, vehicle_masks = self.list_to_tensor(vehicles, self.max_vehicles, self.t_h * 2 + 1, 5)
         pedestrians, pedestrian_masks = self.list_to_tensor(pedestrians, self.max_pedestrians, self.t_h * 2 + 1, 5) 
-        max_length = max([len(array) for array in paths_vectors_v])
-        paths_vectors_v, paths_vectors_v_masks = self.list_to_tensor(paths_vectors_v, self.max_vehicles, max_length , 17)
+        # max_length = max([len(array) for array in paths_vectors_v])
+        # paths_vectors_v, paths_vectors_v_masks = self.list_to_tensor(paths_vectors_v, self.max_vehicles, max_length , 17)
 
         # Get adjacency matrix
         adj_matrix, len_adj = self.get_adj_matrix(vehicles,vehicle_masks.any(-1),pedestrians,pedestrian_masks.any(-1))
@@ -233,8 +244,7 @@ class NuScenesVector(NuScenesTrajectories):
             'pedestrians': pedestrians,
             'pedestrian_masks': pedestrian_masks,
             'adj_matrix': adj_matrix,  
-            'len_adj': len_adj,  
-            'path_candidates': paths_vectors_v
+            'len_adj': len_adj,   
         }
 
         return surrounding_agent_representation
@@ -400,10 +410,12 @@ class NuScenesVector(NuScenesTrajectories):
         paths_ids = {}
         paths_vectors = []
         for k, agent in enumerate(agent_list):
-            if 'vehicle' in agent_type:
-                # Get path candidates for vehicles
-                paths_ids[agent_i_ts[k]] = get_lanes_for_agent(agent[0][0],agent[0][1],agent_yaw[k],map_api)[0] 
-                paths_vectors.append(self.get_path(paths_ids[agent_i_ts[k]], map_api, origin))
+            # if 'vehicle' in agent_type:
+            #     # Get path candidates for vehicles
+            #     paths_ids[agent_i_ts[k]] = self.get_lanes_for_agent(agent[0][0],agent[0][1],agent_yaw[k],map_api)  
+            #     path = self.get_path(paths_ids[agent_i_ts[k]], map_api, origin)
+            #     paths, paths_ids[agent_i_ts[k]] = self.split_lanes(path, self.polyline_length, paths_ids[agent_i_ts[k]])
+            #     paths_vectors.append(paths)
             for n, pose in enumerate(agent):
                 local_pose = self.global_to_local(origin, (pose[0], pose[1], 0))
                 agent[n] = np.asarray([local_pose[0], local_pose[1]])
@@ -415,7 +427,7 @@ class NuScenesVector(NuScenesTrajectories):
             motion_states = motion_states[-len(xy):, :]
             agent_list[n] = np.concatenate((xy, motion_states), axis=1)
         
-        return agent_list, paths_ids, paths_vectors
+        return agent_list 
 
     def discard_poses_outside_extent(self, pose_set: List[np.ndarray],
                                      ids: List[str] = None) -> Union[List[np.ndarray],

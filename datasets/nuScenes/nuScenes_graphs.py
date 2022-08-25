@@ -70,6 +70,7 @@ class NuScenesGraphs(NuScenesVector):
         ground_truth = super().get_ground_truth(idx)
         return ground_truth
 
+
     def get_map_representation(self, idx: int) -> Union[Tuple[int, int], Dict]:
         """
         Extracts map representation
@@ -85,8 +86,9 @@ class NuScenesGraphs(NuScenesVector):
         global_pose = self.get_target_agent_global_pose(idx)
 
         # Get path candidates
-        paths_ids = {i_t: get_lanes_for_agent(global_pose[0],global_pose[1],global_pose[2],map_api)[0] } 
-        paths_vectors = self.get_path(paths_ids[i_t], map_api)
+        # paths_ids = {i_t: self.get_lanes_for_agent(global_pose[0],global_pose[1],global_pose[2],map_api) } 
+        # paths_vectors = self.get_path(paths_ids[i_t], map_api)
+        # paths_ids, paths_vectors = self.split_lanes(paths_vectors, self.polyline_length, paths_ids)
 
         # Get lanes around agent within map_extent
         lanes = self.get_lanes_around_agent(global_pose, map_api)
@@ -125,6 +127,10 @@ class NuScenesGraphs(NuScenesVector):
         # Get edge lookup tables
         s_next, edge_type = self.get_edge_lookup(e_succ, e_prox)
 
+        # Build adjacency matrix for heterograph - treating succ and prox edges separately and directional 
+        lanes_adj_matrix = self.build_adj_mat_directional_with_types(s_next, edge_type)
+        
+
         # Convert list of lane node feats to fixed size numpy array and masks
         lane_node_feats, lane_node_masks = self.list_to_tensor(lane_node_feats, self.max_nodes, self.polyline_length, 6)
 
@@ -132,13 +138,21 @@ class NuScenesGraphs(NuScenesVector):
             'lane_node_feats': lane_node_feats,
             'lane_node_masks': lane_node_masks,
             's_next': s_next,
-            'edge_type': edge_type,
-            'paths_ids': paths_ids,
-            'path_candidates': paths_vectors
+            'edge_type': edge_type, 
+            'adj_matrix': lanes_adj_matrix
         }
 
         return map_representation
 
+    @staticmethod
+    def build_adj_mat_directional_with_types(edges, edges_type):
+        # Given edges [B, number of nodes, edges per node] create adjacency matrix [B, number of nodes, number of nodes]
+        edges_adj = np.zeros((edges.shape[0], edges.shape[0])) 
+        for i in range(edges.shape[0]):
+            for j in range(edges.shape[1]-1):
+                edges_adj[i,int(edges[i,j])] = edges_type[i,j]
+        return edges_adj
+    
     @staticmethod
     def get_successor_edges(lane_ids: List[str], map_api: NuScenesMap) -> List[List[int]]:
         """

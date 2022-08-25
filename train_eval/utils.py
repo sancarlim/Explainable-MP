@@ -62,8 +62,15 @@ def collate_fn_dgl(batch):
     graphs = [dgl.from_scipy(spp.coo_matrix(adj)).int() for adj in adj_matrix]
     #[dgl.graph((s,d)) for s,d in zip(src,dst)] 
     # graphs = [dgl.add_self_loop(graph) for graph in graphs]
-    batched_graph = dgl.batch(graphs)
-    # batched_graph = dgl.add_self_loop(batched_graph) NO pq mete self loops en nodos que no existen
+    interaction_batched_graph = dgl.batch(graphs)
+
+    # Create lanes heterograph 
+    adj_matrix = [element['inputs']['map_representation']['adj_matrix'] for element in batch]
+    lanes_heterograph = [dgl.from_scipy(spp.coo_matrix(adj)).int() for adj in adj_matrix]
+    lanes_heterograph = [dgl.add_self_loop(graph) for graph in graphs]
+    lanes_batched_graph = dgl.batch(lanes_heterograph)
+
     data = default_collate(batch)
-    data['inputs']['graphs'] = batched_graph
+    data['inputs']['interaction_graphs'] = interaction_batched_graph
+    data['inputs']['lanes_graphs'] = lanes_batched_graph
     return data
