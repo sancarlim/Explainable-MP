@@ -112,11 +112,11 @@ class Visualizer:
         for n, indices in enumerate(index_list):
             imgs, fancy_img, graph_img, scene = self.generate_nuscenes_gif(indices)
             filename = os.path.join(output_dir, 'results', 'gifs', 'example' + str(n) + scene  + '_fancy.gif')
-            imageio.mimsave(filename, fancy_img, format='GIF', fps=2)
+            imageio.mimsave(filename, fancy_img, format='GIF', fps=2) 
             """ filename = os.path.join(output_dir, 'results', 'gifs', 'example' + str(n) + scene + '.gif')
-            imageio.mimsave(filename, imgs, format='GIF', fps=2) 
+            imageio.mimsave(filename, imgs, format='GIF', fps=2)
             filename = os.path.join(output_dir, 'results', 'gifs', 'example' + str(n) + scene  + '_graph.gif')
-            imageio.mimsave(filename, graph_img, format='GIF', fps=2) """
+            imageio.mimsave(filename, graph_img, format='GIF', fps=2)  """ 
             print('Saved gif for example ' + str(n) + ' in ' + str(time.time() - start) + ' seconds')
 
     def get_vis_idcs_nuscenes(self):
@@ -140,12 +140,12 @@ class Visualizer:
 
         return idcs
 
-    def visualize_graph(self, fig, ax, node_feats, s_next, edge_type, evf_gt, node_seq, fut_xy):
+    def visualize_graph(self, fig, ax, node_feats, s_next, edge_type, evf_gt, node_seq, fut_xy, pi, cmap_cool):
         """
         Function to visualize lane graph.
         """ 
         ax.imshow(np.zeros((3, 3)), extent=[-60,60,-40,100], cmap='gist_gray')
-
+        
         # Plot edges
         for src_id, src_feats in enumerate(node_feats):
             feat_len = np.sum(np.sum(np.absolute(src_feats), axis=1) != 0)
@@ -157,6 +157,7 @@ class Visualizer:
                 for idx, dest_id in enumerate(s_next[src_id]):
                     edge_t = edge_type[src_id, idx]
                     visited = evf_gt[src_id, idx]
+                    pi_edge = np.exp(pi[src_id, idx])
                     if 3 > edge_t > 0:
 
                         dest_feats = node_feats[int(dest_id)]
@@ -167,10 +168,11 @@ class Visualizer:
                         d_y = dest_y - src_y
 
                         line_style = '-' if edge_t == 1 else '--'
+                        color = cmap_cool(pi_edge) if edge_t == 1 else 'w'
                         width = 2 if visited else 0.005
                         alpha = 1 if visited else 0.5
 
-                        plt.arrow(src_x, src_y, d_x, d_y, color='w', head_width=0.1, length_includes_head=True,
+                        plt.arrow(src_x, src_y, d_x, d_y, color=color, head_width=0.1, length_includes_head=True,
                                   linestyle=line_style, width=width, alpha=alpha)
 
         # Plot nodes
@@ -187,7 +189,7 @@ class Visualizer:
                 s = 200 if visited else 50
                 ax.scatter(x, y, s, c=c)
 
-        plt.plot(fut_xy[:, 0], fut_xy[:, 1], color='r', lw=3)
+        plt.plot(fut_xy[:, 0], fut_xy[:, 1], color='r', lw=0.5, alpha=0.5)
 
         plt.show()
         return fig, ax
@@ -204,7 +206,7 @@ class Visualizer:
         log=self.ns.get('log', scene['log_token'])
         location = log['location']
         nusc_map = NuScenesMap(dataroot=self.dataroot, map_name=location)
-
+        
         
         imgs = []
         imgs_fancy = []
@@ -226,12 +228,14 @@ class Visualizer:
             pose_record = self.ns.get('ego_pose', sample_data_record['ego_pose_token'])
             ego_poses=np.array(pose_record['translation'][:2])
             # Retrieve ego history 
+
             """ for history_t in reversed(range(4)):
                 prev_sample_data = self.ns.get('sample_data', sample_data_record['prev'])
                 history_name = 'history_' + str(history_t)  
                 pose_record[history_name] = self.ns.get('ego_pose', prev_sample_data['ego_pose_token'])['translation']
-                pose_record[history_name].append(self.ns.get('ego_pose', prev_sample_data['ego_pose_token'])['rotation']) """
-
+                pose_record[history_name].append(self.ns.get('ego_pose', prev_sample_data['ego_pose_token'])['rotation'])  
+            """
+            
             # Render the map patch with the current ego poses.
             min_patch = np.floor(ego_poses - patch_margin)
             max_patch = np.ceil(ego_poses + patch_margin)
@@ -283,12 +287,6 @@ class Visualizer:
                     veh_box = AnnotationBbox(oi, (history[-1, 0], history[-1, 1]), frameon=False)
                     veh_box.zorder = 800
                     ax2.add_artist(veh_box) 
-                elif ann['category_name'].split('.')[0] == 'vehicle':
-                    r_img = rotate(cars, quaternion_yaw(Quaternion(ann['rotation']))*180/math.pi,reshape=True)
-                    oi = OffsetImage(r_img, zoom=0.01, zorder=500)
-                    veh_box = AnnotationBbox(oi, (history[-1, 0], history[-1, 1]), frameon=False)
-                    veh_box.zorder = 800
-                    ax2.add_artist(veh_box) 
                 elif ann['category_name'].split('.')[1] == 'motorcycle' or ann['category_name'].split('.')[1] == 'bicycle':
                     circle = plt.Circle((history[-1, 0],
                                 history[-1, 1]),
@@ -298,6 +296,12 @@ class Visualizer:
                                 lw=circle_edge_width,
                                 zorder=3)
                     ax2.add_artist(circle)
+                elif ann['category_name'].split('.')[0] == 'vehicle':
+                    r_img = rotate(cars, quaternion_yaw(Quaternion(ann['rotation']))*180/math.pi,reshape=True)
+                    oi = OffsetImage(r_img, zoom=0.01, zorder=500)
+                    veh_box = AnnotationBbox(oi, (history[-1, 0], history[-1, 1]), frameon=False)
+                    veh_box.zorder = 800
+                    ax2.add_artist(veh_box)                 
                 else: 
                     circle = plt.Circle((history[-1, 0],
                                 history[-1, 1]),
@@ -307,6 +311,7 @@ class Visualizer:
                                 lw=circle_edge_width,
                                 zorder=3)
                     ax2.add_artist(circle)
+            
 
             # Get raster map
             """ hd_map = self.raster_maps.make_input_representation(i_t, s_t, pose_record)
@@ -327,10 +332,13 @@ class Visualizer:
             """ fig, ax = plt.subplots(1, 3, figsize=(15, 5))
             ax[0].imshow(hd_map, extent=self.ds.map_extent)
             ax[1].imshow(hd_map_gray, cmap='gist_gray', extent=self.ds.map_extent)
-            ax[2].imshow(hd_map_gray, cmap='gist_gray', extent=self.ds.map_extent) """
+            ax[2].imshow(hd_map_gray, cmap='gist_gray', extent=self.ds.map_extent) 
 
-            fig3, ax3 = plt.subplots()
-
+            #fig3, ax3 = plt.subplots()
+            cmap_cool = plt.get_cmap('cool')
+            sm_cool = plt.cm.ScalarMappable(cmap=cmap_cool , norm=plt.Normalize(vmin=0, vmax=1)) 
+            cbar_cool = plt.colorbar(sm_cool)
+            cbar_cool.set_label('Probability of each cluster', rotation=270) """
             for n, traj in enumerate(predictions['traj'][0]):
                 """ ax[1].plot(traj[:, 0].detach().cpu().numpy(), traj[:, 1].detach().cpu().numpy(), lw=4,
                            color='r', alpha=0.8)
@@ -339,9 +347,10 @@ class Visualizer:
                 global_traj = convert_local_coords_to_global(traj.detach().cpu().numpy(), agent_translation, agent_rotation)
                 ax2.plot(global_traj[:, 0], global_traj[:, 1], color=cmap_cool(4*predictions['probs'][0][n].detach().cpu().numpy()), lw=max(1,7*predictions['probs'][0][n]), linestyle = '--', alpha=0.8) 
                 
-                """ self.visualize_graph(fig3,ax3,data['inputs']['map_representation']['lane_node_feats'][0].detach().cpu().numpy(), 
-                                        data['inputs']['map_representation']['s_next'][0].detach().cpu().numpy(), data['inputs']['map_representation']['edge_type'][0].detach().cpu().numpy(),
-                                        data['ground_truth']['evf_gt'][0].detach().cpu().numpy(), data['inputs']['node_seq_gt'][0].detach().cpu().numpy(), traj.detach().cpu().numpy()) """
+                """self.visualize_graph(fig3,ax3,data['inputs']['map_representation']['lane_node_feats'][0].detach().cpu().numpy(), 
+                                    data['inputs']['map_representation']['s_next'][0].detach().cpu().numpy(), data['inputs']['map_representation']['edge_type'][0].detach().cpu().numpy(),
+                                    data['ground_truth']['evf_gt'][0].detach().cpu().numpy(), data['inputs']['node_seq_gt'][0].detach().cpu().numpy(), traj.detach().cpu().numpy(), 
+                                    predictions['pi'][0].detach().cpu().numpy(), cmap_cool) """
 
             """ traj_gt = data['ground_truth']['traj'][0]
             ax[2].plot(traj_gt[:, 0].detach().cpu().numpy(), traj_gt[:, 1].detach().cpu().numpy(), lw=4, color='g')
@@ -359,15 +368,15 @@ class Visualizer:
             image_from_plot = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
             image_from_plot = image_from_plot.reshape(fig.canvas.get_width_height()[::-1] + (3,))
             imgs.append(image_from_plot)
-            plt.close(fig)"""
+            plt.close(fig) """
 
             fig2.canvas.draw()
             image_from_plot = np.frombuffer(fig2.canvas.tostring_rgb(), dtype=np.uint8) 
             image_from_plot = image_from_plot.reshape(fig2.canvas.get_width_height()[::-1] + (3,))
             imgs_fancy.append(image_from_plot)
-            plt.close(fig2)
+            plt.close(fig2) 
 
-            """ fig3.canvas.draw()
+            """fig3.canvas.draw()
             image_from_plot = np.frombuffer(fig3.canvas.tostring_rgb(), dtype=np.uint8) 
             image_from_plot = image_from_plot.reshape(fig3.canvas.get_width_height()[::-1] + (3,))
             graph_img.append(image_from_plot)
