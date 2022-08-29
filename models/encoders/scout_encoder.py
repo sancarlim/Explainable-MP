@@ -460,19 +460,11 @@ class SCOUTEncoder(PredictionEncoder):
         # nbr_ped_enc = torch.cat((nbr_ped_enc, agent_nbr_context[1+nbr_vehicle_enc.shape[0]:]), dim=-1) 
 
         # Encode lane nodes 
-        lanes_graphs = inputs['lanes_graphs'].to(target_agent_feats.device).create_formats_()
+        lanes_graphs = inputs['lanes_graphs'].to(target_agent_feats.device) 
         lane_node_feats = inputs['map_representation']['lane_node_feats']
         lane_node_masks = inputs['map_representation']['lane_node_masks'] 
         lane_node_enc = self.lane_node_emb(lane_node_feats, lane_node_masks)  
         
-
-        # Build adjacency matrix for heterograph - treating succ and prox edges separately and directional 
-        lanes_adj_matrix = self.build_adj_mat_directional_with_types(inputs['map_representation']['s_next'], inputs['map_representation']['edge_type'])
-        lanes_heterograph = [dgl.from_scipy(spp.coo_matrix(adj)).int() for adj in lanes_adj_matrix.cpu().numpy()]
-        batched_graph = dgl.batch(lanes_heterograph)
-        
-        
-       
         # Agent-node attention (between nbrs and lanes)  
         veh_interaction_feats = torch.cuda.FloatTensor(interaction_feats.shape[0],nbr_vehicle_feats.shape[1], interaction_feats.shape[-1])
         ped_interaction_feats = torch.cuda.FloatTensor(interaction_feats.shape[0],nbr_ped_feats.shape[1], interaction_feats.shape[-1]) 

@@ -66,7 +66,7 @@ def collate_fn_dgl(batch):
 
     # Create lanes heterograph 
     adj_matrix = [element['inputs']['map_representation']['adj_matrix'] for element in batch]
-    lanes_heterograph = [dgl.from_scipy(spp.coo_matrix(adj)).int() for adj in adj_matrix]
+    lanes_heterograph = [dgl.heterograph(dgl.from_scipy(spp.coo_matrix(adj))).int() for adj in adj_matrix]
     lanes_heterograph = [dgl.add_self_loop(graph) for graph in graphs]
     lanes_batched_graph = dgl.batch(lanes_heterograph)
 
