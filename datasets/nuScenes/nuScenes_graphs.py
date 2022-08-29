@@ -96,7 +96,7 @@ class NuScenesGraphs(NuScenesVector):
         # Get relevant polygon layers from the map_api
         polygons = self.get_polygons_around_agent(global_pose, map_api)
 
-        # Get vectorized representation of lanes
+        # Get vectorized represlane_idsentation of lanes
         lane_node_feats, lane_ids = self.get_lane_node_feats(global_pose, lanes, polygons)
 
         # Discard lanes outside map extent
@@ -137,6 +137,7 @@ class NuScenesGraphs(NuScenesVector):
         map_representation = {
             'lane_node_feats': lane_node_feats,
             'lane_node_masks': lane_node_masks,
+            'lane_ids': lane_ids,
             's_next': s_next,
             'edge_type': edge_type, 
             'adj_matrix': lanes_adj_matrix
