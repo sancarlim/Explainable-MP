@@ -341,24 +341,27 @@ class Visualizer:
             hd_map_gray = 0.2989 * r + 0.5870 * g + 0.1140 * b """
 
 
-            # Plot visited lanes
+            # Plot visited lanes and mask 
             if idx == idcs[0]:
                 node_feats = data['inputs']['map_representation']['lane_node_feats'][0].detach().cpu().numpy()
                 lane_masks = data['inputs']['map_representation']['lane_node_masks'][0,:,:,0].detach().cpu().numpy().any(-1) # 164
-                lane_ids = data['inputs']['map_representation']['lane_ids']
-                node_feats = node_feats[lane_masks] 
+                lane_ids = data['inputs']['map_representation']['lane_ids'] 
                 evf_gt = data['ground_truth']['evf_gt'][0].detach().cpu().numpy()
                 snext = data['inputs']['map_representation']['s_next'][0].detach().cpu().numpy()
-                for node_id in data['inputs']['node_seq_gt'][0].int()[ data['inputs']['node_seq_gt'][0].int()<len(node_feats)]:
+                for node_id in data['inputs']['node_seq_gt'][0].int()[ data['inputs']['node_seq_gt'][0].int()<len(node_feats)][:1]:
                     node_feat = node_feats[node_id]
-                    next_lane = int(snext[node_id][evf_gt[node_id]==1])
+                    next_lanes = snext[node_id][evf_gt[node_id]==1].astype(int)
                     feat_len = np.sum(np.sum(np.absolute(node_feat), axis=1) != 0)
-                    global_node_coords = convert_local_coords_to_global(node_feat[:feat_len,:2], agent_translation, agent_rotation)
-                    ax2.scatter(global_node_coords[:, 0],global_node_coords[:, 1], s=40, color='r', alpha=0.8)
-                    if next_lane < len(node_feats):
-                        feat_len = np.sum(np.sum(np.absolute(node_feats[next_lane]), axis=1) != 0)
-                        global_node_coords = convert_local_coords_to_global(node_feats[next_lane][:feat_len,:2], agent_translation, agent_rotation)
-                        ax2.scatter(global_node_coords[:, 0],global_node_coords[:, 1], s=40, color='r', alpha=0.8) 
+                    # global_node_coords = convert_local_coords_to_global(node_feat[:feat_len,:2], agent_translation, agent_rotation)
+                    # Plot visited lanes
+                    # ax2.scatter(global_node_coords[:, 0],global_node_coords[:, 1], s=40, color='r', alpha=0.8)
+                    # Plot lanes visited in the future
+                    for next_lane in next_lanes[:1]:
+                        if next_lane < len(node_feats):
+                            feat_len = np.sum(np.sum(np.absolute(node_feats[next_lane]), axis=1) != 0)
+                            global_node_coords = convert_local_coords_to_global(node_feats[next_lane][:feat_len,:2], agent_translation, agent_rotation)
+                            ax2.scatter(global_node_coords[:, 0],global_node_coords[:, 1], s=40, color='r', alpha=0.8) 
+                            data['inputs']['map_representation']['lane_node_masks'][0,next_lane,:,:] += torch.ones(data['inputs']['map_representation']['lane_node_masks'][0,0,:,:].shape, device=device)
 
             # Predict
             if self.encoder_type == 'scout_encoder':
