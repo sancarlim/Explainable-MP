@@ -43,10 +43,13 @@ class PGPEncoder(PredictionEncoder):
         # Node encoders
         self.node_emb = nn.Linear(args['node_feat_size'], args['node_emb_size'])
         self.node_encoder = nn.GRU(args['node_emb_size'], args['node_enc_size'], batch_first=True)
+        self.lane_mask_prob = args['lane_mask_prob']
 
         # Surrounding agent encoder
         self.nbr_emb = nn.Linear(args['nbr_feat_size'] + 1, args['nbr_emb_size'])
         self.nbr_enc = nn.GRU(args['nbr_emb_size'], args['nbr_enc_size'], batch_first=True)
+        self.agent_mask_prob_v = args['agent_mask_prob_v']
+        self.agent_mask_prob_p = args['agent_mask_prob_p']
 
         # Agent-node attention
         self.query_emb = nn.Linear(args['node_enc_size'], args['node_enc_size'])
@@ -99,7 +102,11 @@ class PGPEncoder(PredictionEncoder):
 
         # Encode lane nodes
         lane_node_feats = inputs['map_representation']['lane_node_feats']
-        lane_node_masks = inputs['map_representation']['lane_node_masks']
+        lane_node_masks = inputs['map_representation']['lane_node_masks'] 
+        # Mask out lane_node_masks by node 'mask_prob'% of the time - 1 means mask out
+        mask_out = torch.bernoulli(torch.ones((lane_node_masks.shape[:2])) * self.lane_mask_prob).unsqueeze(-1).repeat(1,1,lane_node_masks.shape[-2]).unsqueeze(-1).repeat(1,1,1,lane_node_masks.shape[-1]).to(lane_node_masks.device)
+        lane_node_masks = ~lane_node_masks.bool() & ~mask_out.bool()
+        inputs['map_representation']['lane_node_masks'] = lane_node_masks # for visualization purposes
         lane_node_embedding = self.leaky_relu(self.node_emb(lane_node_feats))
         lane_node_enc = self.variable_size_gru_encode(lane_node_embedding, lane_node_masks, self.node_encoder) # B,164,32
 
@@ -107,11 +114,17 @@ class PGPEncoder(PredictionEncoder):
         nbr_vehicle_feats = inputs['surrounding_agent_representation']['vehicles']
         nbr_vehicle_feats = torch.cat((nbr_vehicle_feats, torch.zeros_like(nbr_vehicle_feats[:, :, :, 0:1])), dim=-1)
         nbr_vehicle_masks = inputs['surrounding_agent_representation']['vehicle_masks']
+        # Mask out nbr_vehicle_masks by agent 20% of the time - 1 means mask out
+        mask_out = torch.bernoulli(torch.ones((nbr_vehicle_masks.shape[:2])) * self.agent_mask_prob_v).unsqueeze(-1).repeat(1,1,nbr_vehicle_masks.shape[-2]).unsqueeze(-1).repeat(1,1,1,nbr_vehicle_masks.shape[-1]).to(nbr_vehicle_masks.device)
+        nbr_vehicle_masks =  ~nbr_vehicle_masks.bool() & ~mask_out.bool()
         nbr_vehicle_embedding = self.leaky_relu(self.nbr_emb(nbr_vehicle_feats))
         nbr_vehicle_enc = self.variable_size_gru_encode(nbr_vehicle_embedding, nbr_vehicle_masks, self.nbr_enc) #B,84,32
         nbr_ped_feats = inputs['surrounding_agent_representation']['pedestrians']
         nbr_ped_feats = torch.cat((nbr_ped_feats, torch.ones_like(nbr_ped_feats[:, :, :, 0:1])), dim=-1)
         nbr_ped_masks = inputs['surrounding_agent_representation']['pedestrian_masks']
+        # Mask out nbr_vehicle_masks by agent 20% of the time 
+        mask_out = torch.bernoulli(torch.ones((nbr_ped_masks.shape[:2])) * self.agent_mask_prob_v).unsqueeze(-1).repeat(1,1,nbr_ped_masks.shape[-2]).unsqueeze(-1).repeat(1,1,1,nbr_ped_masks.shape[-1]).to(nbr_ped_masks.device)
+        nbr_ped_masks =  ~nbr_ped_masks.bool() & ~mask_out.bool()
         nbr_ped_embedding = self.leaky_relu(self.nbr_emb(nbr_ped_feats))
         nbr_ped_enc = self.variable_size_gru_encode(nbr_ped_embedding, nbr_ped_masks, self.nbr_enc)
 
@@ -169,13 +182,13 @@ class PGPEncoder(PredictionEncoder):
         """
 
         # Form a large batch of all sequences in the batch
-        masks_for_batching = ~masks[:, :, :, 0].bool() # B, 164,20,6
-        masks_for_batching = masks_for_batching.any(dim=-1).unsqueeze(2).unsqueeze(3) # 32, 164,1,1
+        # masks_for_batching = ~masks[:, :, :, 0].bool() # B, 164,20,6
+        masks_for_batching = masks[:, :, :, 0].any(dim=-1).unsqueeze(2).unsqueeze(3) # 32, 164,1,1
         feat_embedding_batched = torch.masked_select(feat_embedding, masks_for_batching) 
         feat_embedding_batched = feat_embedding_batched.view(-1, feat_embedding.shape[2], feat_embedding.shape[3]) # 970,20,16
 
         # Pack padded sequences
-        seq_lens = torch.sum(1 - masks[:, :, :, 0], dim=-1) # B, 164
+        seq_lens = torch.sum(masks[:, :, :, 0].long(), dim=-1) # B, 164
         seq_lens_batched = seq_lens[seq_lens != 0].cpu() # Bx164 != 0 =» 970
         if len(seq_lens_batched) != 0:
             feat_embedding_packed = pack_padded_sequence(feat_embedding_batched, seq_lens_batched,

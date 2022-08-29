@@ -109,10 +109,12 @@ class Visualizer:
         if not os.path.isdir(os.path.join(output_dir, 'results', 'gifs')):
             os.mkdir(os.path.join(output_dir, 'results', 'gifs'))
         start = time.time()
-        for n, indices in enumerate(index_list):
-            imgs, fancy_img, graph_img, scene = self.generate_nuscenes_gif(indices)
+        for n, indices in enumerate(index_list[9:10]):
+            imgs, fancy_img, img_lane_mask, graph_img, scene = self.generate_nuscenes_gif(indices)
             filename = os.path.join(output_dir, 'results', 'gifs', 'example' + str(n) + scene  + '_fancy.gif')
-            imageio.mimsave(filename, fancy_img, format='GIF', fps=2) 
+            imageio.mimsave(filename, fancy_img, format='GIF', fps=2)  
+            filename = os.path.join(output_dir, 'results', 'gifs', 'example' + str(n) + scene  + '_lane_mask.png')
+            #plt.imsave(filename, img_lane_mask)
             """ filename = os.path.join(output_dir, 'results', 'gifs', 'example' + str(n) + scene + '.gif')
             imageio.mimsave(filename, imgs, format='GIF', fps=2)
             filename = os.path.join(output_dir, 'results', 'gifs', 'example' + str(n) + scene  + '_graph.gif')
@@ -211,7 +213,7 @@ class Visualizer:
         imgs = []
         imgs_fancy = []
         graph_img = []
-        for idx in idcs: 
+        for idx in idcs[:]: 
             # Load data
             data = self.ds[idx]
             data = u.send_to_device(u.convert_double_to_float(u.convert2tensors(data)))
@@ -254,15 +256,34 @@ class Visualizer:
             cmap_cool = plt.get_cmap('cool')
             sm_cool = plt.cm.ScalarMappable(cmap=cmap_cool , norm=plt.Normalize(vmin=0, vmax=1)) 
             cbar_cool = plt.colorbar(sm_cool)
-            cbar_cool.set_label('Probability of each cluster', rotation=270)
+            cbar_cool.set_label('Probability of each mode', rotation=270)
                                         
             r_img = rotate(ego_car, quaternion_yaw(Quaternion(pose_record['rotation']))*180/math.pi,reshape=True)
-            oi = OffsetImage(r_img, zoom=0.02, zorder=500)
+            oi = OffsetImage(r_img, zoom=0.01, zorder=500)
             veh_box = AnnotationBbox(oi, (ego_poses[0], ego_poses[1]), frameon=False)
             veh_box.zorder = 500
             ax2.add_artist(veh_box)
 
-            for ann in annotations:
+            # mask out annotations 20% of the time 
+            if idx == idcs[0]:
+                #mask_out = np.random.binomial(1, 0., len(annotations))
+                vehicle_masked_t = [annotations[7]['instance_token']]#[annotations[i]['instance_token'] for i in range(len(annotations)) if 'vehicle' in annotations[i]['category_name'] and annotations[i]['instance_token']!=i_t and mask_out[i]]
+                mask_vehicles = []
+                for i in range(len(annotations)):
+                    if 'vehicle' in annotations[i]['category_name'] and annotations[i]['instance_token']!=i_t:
+                        if annotations[i]['instance_token'] == annotations[7]['instance_token']:
+                            mask_vehicles.append(1)
+                        else:
+                            mask_vehicles.append(0)
+               
+                #[mask_out[i] for i in range(len(annotations)) if 'vehicle' in annotations[i]['category_name'] and annotations[i]['instance_token']!=i_t]
+            else:
+                mask_vehicles = [1 if annotations[i]['instance_token'] in vehicle_masked_t else 0 for i in range(len(annotations)) if 'vehicle' in annotations[i]['category_name'] and annotations[i]['instance_token']!=i_t]
+            data['inputs']['surrounding_agent_representation']['vehicle_masks'][0,:len(mask_vehicles)] += torch.tensor(mask_vehicles).unsqueeze(-1).unsqueeze(-1).repeat(1,5,5).to(device)
+            
+            for n, ann in enumerate(annotations):
+                if ann['instance_token'] in vehicle_masked_t and ann['instance_token']!=i_t:
+                    continue 
                 #Plot history
                 if len(past[ann['instance_token']]) > 0:
                     history =  np.concatenate((past[ann['instance_token']][::-1], np.array([ann['translation'][:2]])))
@@ -298,10 +319,11 @@ class Visualizer:
                     ax2.add_artist(circle)
                 elif ann['category_name'].split('.')[0] == 'vehicle':
                     r_img = rotate(cars, quaternion_yaw(Quaternion(ann['rotation']))*180/math.pi,reshape=True)
-                    oi = OffsetImage(r_img, zoom=0.01, zorder=500)
+                    oi = OffsetImage(r_img, zoom=0.01, zorder=5)
                     veh_box = AnnotationBbox(oi, (history[-1, 0], history[-1, 1]), frameon=False)
-                    veh_box.zorder = 800
+                    veh_box.zorder = 5
                     ax2.add_artist(veh_box)                 
+                    # ax2.annotate(str(n), (history[-1, 0], history[-1, 1]), fontsize=10, zorder=10)
                 else: 
                     circle = plt.Circle((history[-1, 0],
                                 history[-1, 1]),
@@ -346,12 +368,21 @@ class Visualizer:
                               color='r', alpha=0.8) """
                 global_traj = convert_local_coords_to_global(traj.detach().cpu().numpy(), agent_translation, agent_rotation)
                 ax2.plot(global_traj[:, 0], global_traj[:, 1], color=cmap_cool(4*predictions['probs'][0][n].detach().cpu().numpy()), lw=max(1,7*predictions['probs'][0][n]), linestyle = '--', alpha=0.8) 
-                
                 """self.visualize_graph(fig3,ax3,data['inputs']['map_representation']['lane_node_feats'][0].detach().cpu().numpy(), 
                                     data['inputs']['map_representation']['s_next'][0].detach().cpu().numpy(), data['inputs']['map_representation']['edge_type'][0].detach().cpu().numpy(),
                                     data['ground_truth']['evf_gt'][0].detach().cpu().numpy(), data['inputs']['node_seq_gt'][0].detach().cpu().numpy(), traj.detach().cpu().numpy(), 
                                     predictions['pi'][0].detach().cpu().numpy(), cmap_cool) """
-
+            
+            if idx == idcs[0]:
+                node_feats = data['inputs']['map_representation']['lane_node_feats'][0].detach().cpu().numpy()
+                lane_masks = data['inputs']['map_representation']['lane_node_masks'][0,:,:,0].detach().cpu().numpy().any(-1) # 164
+                node_feats = node_feats[~lane_masks]
+                for node_id, node_feat in enumerate(node_feats):
+                    feat_len = np.sum(np.sum(np.absolute(node_feat), axis=1) != 0)
+                    if feat_len > 0:
+                        global_node_coords = convert_local_coords_to_global(node_feat[:feat_len,:2], agent_translation, agent_rotation)
+                        ax2.plot(global_node_coords[:, 0], global_node_coords[:, 1], color = 'y',linestyle = '--', alpha=0.8) 
+                
             """ traj_gt = data['ground_truth']['traj'][0]
             ax[2].plot(traj_gt[:, 0].detach().cpu().numpy(), traj_gt[:, 1].detach().cpu().numpy(), lw=4, color='g')
             ax[2].scatter(traj_gt[-1, 0].detach().cpu().numpy(), traj_gt[-1, 1].detach().cpu().numpy(), 60, color='g')
@@ -373,7 +404,10 @@ class Visualizer:
             fig2.canvas.draw()
             image_from_plot = np.frombuffer(fig2.canvas.tostring_rgb(), dtype=np.uint8) 
             image_from_plot = image_from_plot.reshape(fig2.canvas.get_width_height()[::-1] + (3,))
-            imgs_fancy.append(image_from_plot)
+            imgs_fancy.append(image_from_plot)  
+            if idx == idcs[0]:
+                img_lane_mask = image_from_plot
+            
             plt.close(fig2) 
 
             """fig3.canvas.draw()
@@ -382,4 +416,4 @@ class Visualizer:
             graph_img.append(image_from_plot)
             plt.close(fig3) """
 
-        return imgs, imgs_fancy, graph_img, scene_name
+        return imgs, imgs_fancy, img_lane_mask, graph_img, scene_name
