@@ -109,7 +109,7 @@ class Visualizer:
         if not os.path.isdir(os.path.join(output_dir, 'results', 'gifs')):
             os.mkdir(os.path.join(output_dir, 'results', 'gifs'))
         start = time.time()
-        for n, indices in enumerate(index_list[9:10]):
+        for n, indices in enumerate(index_list[:]):
             imgs, fancy_img, img_lane_mask, graph_img, scene = self.generate_nuscenes_gif(indices)
             filename = os.path.join(output_dir, 'results', 'gifs', 'example' + str(n) + scene  + '_fancy.gif')
             imageio.mimsave(filename, fancy_img, format='GIF', fps=2)  
@@ -213,7 +213,7 @@ class Visualizer:
         imgs = []
         imgs_fancy = []
         graph_img = []
-        for idx in idcs[:]: 
+        for idx in idcs[:1]: 
             # Load data
             data = self.ds[idx]
             data = u.send_to_device(u.convert_double_to_float(u.convert2tensors(data)))
@@ -267,11 +267,11 @@ class Visualizer:
             # mask out annotations 20% of the time 
             if idx == idcs[0]:
                 #mask_out = np.random.binomial(1, 0., len(annotations))
-                vehicle_masked_t = [annotations[7]['instance_token']]#[annotations[i]['instance_token'] for i in range(len(annotations)) if 'vehicle' in annotations[i]['category_name'] and annotations[i]['instance_token']!=i_t and mask_out[i]]
+                vehicle_masked_t = []#annotations[7]['instance_token']]#[annotations[i]['instance_token'] for i in range(len(annotations)) if 'vehicle' in annotations[i]['category_name'] and annotations[i]['instance_token']!=i_t and mask_out[i]]
                 mask_vehicles = []
                 for i in range(len(annotations)):
                     if 'vehicle' in annotations[i]['category_name'] and annotations[i]['instance_token']!=i_t:
-                        if annotations[i]['instance_token'] == annotations[7]['instance_token']:
+                        if annotations[i]['instance_token'] in vehicle_masked_t:
                             mask_vehicles.append(1)
                         else:
                             mask_vehicles.append(0)
@@ -340,6 +340,26 @@ class Visualizer:
             r, g, b = hd_map[:, :, 0] / 255, hd_map[:, :, 1] / 255, hd_map[:, :, 2] / 255
             hd_map_gray = 0.2989 * r + 0.5870 * g + 0.1140 * b """
 
+
+            # Plot visited lanes
+            if idx == idcs[0]:
+                node_feats = data['inputs']['map_representation']['lane_node_feats'][0].detach().cpu().numpy()
+                lane_masks = data['inputs']['map_representation']['lane_node_masks'][0,:,:,0].detach().cpu().numpy().any(-1) # 164
+                lane_ids = data['inputs']['map_representation']['lane_ids']
+                node_feats = node_feats[lane_masks] 
+                evf_gt = data['ground_truth']['evf_gt'][0].detach().cpu().numpy()
+                snext = data['inputs']['map_representation']['s_next'][0].detach().cpu().numpy()
+                for node_id in data['inputs']['node_seq_gt'][0].int()[ data['inputs']['node_seq_gt'][0].int()<len(node_feats)]:
+                    node_feat = node_feats[node_id]
+                    next_lane = int(snext[node_id][evf_gt[node_id]==1])
+                    feat_len = np.sum(np.sum(np.absolute(node_feat), axis=1) != 0)
+                    global_node_coords = convert_local_coords_to_global(node_feat[:feat_len,:2], agent_translation, agent_rotation)
+                    ax2.scatter(global_node_coords[:, 0],global_node_coords[:, 1], s=40, color='r', alpha=0.8)
+                    if next_lane < len(node_feats):
+                        feat_len = np.sum(np.sum(np.absolute(node_feats[next_lane]), axis=1) != 0)
+                        global_node_coords = convert_local_coords_to_global(node_feats[next_lane][:feat_len,:2], agent_translation, agent_rotation)
+                        ax2.scatter(global_node_coords[:, 0],global_node_coords[:, 1], s=40, color='r', alpha=0.8) 
+
             # Predict
             if self.encoder_type == 'scout_encoder':
                 adj_matrix = data['inputs']['surrounding_agent_representation']['adj_matrix'][0].cpu()
@@ -347,7 +367,7 @@ class Visualizer:
                 adj_matrix = adj_matrix[:len_adj, :len_adj] 
                 graphs = dgl.from_scipy(spp.coo_matrix(adj_matrix)).int() 
                 data['inputs']['graphs'] = graphs
-
+            
             predictions = self.model(data['inputs'])
 
             # Plot
@@ -373,17 +393,9 @@ class Visualizer:
                                     data['ground_truth']['evf_gt'][0].detach().cpu().numpy(), data['inputs']['node_seq_gt'][0].detach().cpu().numpy(), traj.detach().cpu().numpy(), 
                                     predictions['pi'][0].detach().cpu().numpy(), cmap_cool) """
             
-            if idx == idcs[0]:
-                node_feats = data['inputs']['map_representation']['lane_node_feats'][0].detach().cpu().numpy()
-                lane_masks = data['inputs']['map_representation']['lane_node_masks'][0,:,:,0].detach().cpu().numpy().any(-1) # 164
-                node_feats = node_feats[~lane_masks]
-                for node_id, node_feat in enumerate(node_feats):
-                    feat_len = np.sum(np.sum(np.absolute(node_feat), axis=1) != 0)
-                    if feat_len > 0:
-                        global_node_coords = convert_local_coords_to_global(node_feat[:feat_len,:2], agent_translation, agent_rotation)
-                        ax2.plot(global_node_coords[:, 0], global_node_coords[:, 1], color = 'y',linestyle = '--', alpha=0.8) 
-                
-            """ traj_gt = data['ground_truth']['traj'][0]
+            
+            
+            """traj_gt = data['ground_truth']['traj'][0]
             ax[2].plot(traj_gt[:, 0].detach().cpu().numpy(), traj_gt[:, 1].detach().cpu().numpy(), lw=4, color='g')
             ax[2].scatter(traj_gt[-1, 0].detach().cpu().numpy(), traj_gt[-1, 1].detach().cpu().numpy(), 60, color='g')
 
