@@ -109,7 +109,7 @@ class Visualizer:
         if not os.path.isdir(os.path.join(output_dir, 'results', 'gifs')):
             os.mkdir(os.path.join(output_dir, 'results', 'gifs'))
         start = time.time()
-        for n, indices in enumerate(index_list[:]):
+        for n, indices in enumerate(index_list[:1]):
             imgs, fancy_img, img_lane_mask, graph_img, scene = self.generate_nuscenes_gif(indices)
             filename = os.path.join(output_dir, 'results', 'gifs', 'example' + str(n) + scene  + '_fancy.gif')
             imageio.mimsave(filename, fancy_img, format='GIF', fps=2)  
@@ -264,10 +264,10 @@ class Visualizer:
             veh_box.zorder = 500
             ax2.add_artist(veh_box)
 
-            # mask out annotations 20% of the time 
+            # mask out vehicles of interest
             if idx == idcs[0]:
                 #mask_out = np.random.binomial(1, 0., len(annotations))
-                vehicle_masked_t = []#annotations[7]['instance_token']]#[annotations[i]['instance_token'] for i in range(len(annotations)) if 'vehicle' in annotations[i]['category_name'] and annotations[i]['instance_token']!=i_t and mask_out[i]]
+                vehicle_masked_t = [] #annotations[7]['instance_token']#[annotations[i]['instance_token'] for i in range(len(annotations)) if 'vehicle' in annotations[i]['category_name'] and annotations[i]['instance_token']!=i_t and mask_out[i]]
                 mask_vehicles = []
                 for i in range(len(annotations)):
                     if 'vehicle' in annotations[i]['category_name'] and annotations[i]['instance_token']!=i_t:
@@ -289,7 +289,18 @@ class Visualizer:
                     history =  np.concatenate((past[ann['instance_token']][::-1], np.array([ann['translation'][:2]])))
                 else:
                     history = np.array([ann['translation'][:2]])
-                ax2.plot(history[:, 0], history[:, 1], 'k--')
+                
+                if n == 0:
+                    # Vehicle n=0 is stopped 
+                    history = np.array([ann['translation'][:2]]).repeat(len(past[ann['instance_token']])+1,axis=0)
+                    ax2.plot(history[:, 0], history[:, 1], 'k--')
+                    history = data['inputs']['surrounding_agent_representation']['vehicles'][:,n,0,:]
+                    history[0,2:] = 0
+                    data['inputs']['surrounding_agent_representation']['vehicles'][:,n,:,:] = history.repeat(5,1).to(device)
+                    # Convert to numpy for plotting
+                    history = history.cpu().numpy()
+                else:
+                    ax2.plot(history[:, 0], history[:, 1], 'k--')
 
                 #Plot future
                 if len(future[ann['instance_token']]) > 0:
@@ -333,7 +344,7 @@ class Visualizer:
                                 lw=circle_edge_width,
                                 zorder=3)
                     ax2.add_artist(circle)
-            
+                
 
             # Get raster map
             """ hd_map = self.raster_maps.make_input_representation(i_t, s_t, pose_record)
@@ -342,10 +353,8 @@ class Visualizer:
 
 
             # Plot visited lanes and mask 
-            if idx == idcs[0]:
-                node_feats = data['inputs']['map_representation']['lane_node_feats'][0].detach().cpu().numpy()
-                lane_masks = data['inputs']['map_representation']['lane_node_masks'][0,:,:,0].detach().cpu().numpy().any(-1) # 164
-                lane_ids = data['inputs']['map_representation']['lane_ids'] 
+            if False: #idx == idcs[0]:
+                node_feats = data['inputs']['map_representation']['lane_node_feats'][0].detach().cpu().numpy() 
                 evf_gt = data['ground_truth']['evf_gt'][0].detach().cpu().numpy()
                 snext = data['inputs']['map_representation']['s_next'][0].detach().cpu().numpy()
                 for node_id in data['inputs']['node_seq_gt'][0].int()[ data['inputs']['node_seq_gt'][0].int()<len(node_feats)][:1]:
