@@ -213,7 +213,8 @@ class Visualizer:
         imgs = []
         imgs_fancy = []
         graph_img = []
-        for idx in idcs[:1]: 
+        veh_token = ''
+        for idx in idcs[:4]: 
             # Load data
             data = self.ds[idx]
             data = u.send_to_device(u.convert_double_to_float(u.convert2tensors(data)))
@@ -290,17 +291,19 @@ class Visualizer:
                 else:
                     history = np.array([ann['translation'][:2]])
                 
-                if n == 0:
+                if n == 0 and idx == idcs[0]:
                     # Vehicle n=0 is stopped 
-                    history = np.array([ann['translation'][:2]]).repeat(len(past[ann['instance_token']])+1,axis=0)
-                    ax2.plot(history[:, 0], history[:, 1], 'k--')
-                    history = data['inputs']['surrounding_agent_representation']['vehicles'][:,n,0,:]
-                    history[0,2:] = 0
-                    data['inputs']['surrounding_agent_representation']['vehicles'][:,n,:,:] = history.repeat(5,1).to(device)
-                    # Convert to numpy for plotting
-                    history = history.cpu().numpy()
-                else:
-                    ax2.plot(history[:, 0], history[:, 1], 'k--')
+                    veh_token = ann['instance_token']
+                    history_fict = future[i_t][-6:-5] 
+                    history = np.array(history_fict )
+                    feature = torch.zeros_like(data['inputs']['surrounding_agent_representation']['vehicles'][:,n,:,:])
+                    feature[:,:,:2] = data['ground_truth']['traj'][:,-6].repeat(data['inputs']['surrounding_agent_representation']['vehicles'][0,n,:,:].shape[0],1)
+                    data['inputs']['surrounding_agent_representation']['vehicles'][:,n,:,:] = feature
+                elif ann['instance_token'] == veh_token:
+                    history = history_fict
+                    data['inputs']['surrounding_agent_representation']['vehicles'][:,n,:,:] = feature 
+                
+                ax2.plot(history[:, 0], history[:, 1], 'k--')
 
                 #Plot future
                 if len(future[ann['instance_token']]) > 0:
