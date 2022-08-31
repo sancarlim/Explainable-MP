@@ -7,8 +7,8 @@ from typing import Dict, List
 from torch import Tensor
 from models.layers import Res1d, Conv1d, MLP, GlobalGraph, LayerNorm
 import torch.nn.functional as F 
-import dgl
-from dgl.nn import GATv2Conv
+from dgl import DGLError
+from dgl.nn import GATv2Conv 
 from dgl import function as fn
 from dgl.nn.pytorch.conv.gatconv import edge_softmax, Identity, expand_as_pair
 import scipy.sparse as spp
@@ -185,6 +185,46 @@ class GATConv(nn.Module):
             else:
                 return rst
 
+class GATv2(nn.Module):
+    def __init__(self,
+                 num_layers,
+                 in_dim,
+                 num_hidden,
+                 out_dim,
+                 heads,
+                 activation,
+                 feat_drop,
+                 attn_drop,
+                 negative_slope,
+                 residual):
+        super(GATv2, self).__init__()
+        self.num_layers = num_layers
+        self.gatv2_layers = nn.ModuleList()
+        self.activation = activation
+        # input projection (no residual)
+        self.gatv2_layers.append(GATv2Conv(
+            in_dim, num_hidden, heads[0],
+            feat_drop, attn_drop, negative_slope, False, self.activation, bias=False, share_weights=True))
+        # hidden layers
+        for l in range(1, num_layers):
+            # due to multi-head, the in_dim = num_hidden * num_heads
+            self.gatv2_layers.append(GATv2Conv(
+                num_hidden * heads[l-1], num_hidden, heads[l],
+                feat_drop, attn_drop, negative_slope, residual, self.activation, bias=False, share_weights=True))
+        # output projection
+        """self.gatv2_layers.append(GATv2Conv(
+            num_hidden * heads[-2], out_dim, heads[-1],
+            feat_drop, attn_drop, negative_slope, residual, None, bias=False, share_weights=True))
+    """
+    def forward(self, g, inputs):
+        h = inputs
+        for l in range(self.num_layers):
+            h = self.gatv2_layers[l](g, h).flatten(1)
+        # output projection
+        # logits = self.gatv2_layers[-1](g, h).mean(1)
+        return h
+
+
 class MultiHeadGATLayer(nn.Module):
     def __init__(self, in_feats, out_feats, num_heads, merge='cat',  feat_drop=0., attn_drop=0.):
         super(MultiHeadGATLayer, self).__init__()
@@ -241,16 +281,19 @@ class PGP_SCOUTEncoder(PredictionEncoder):
         self.target_agent_enc = nn.GRU(args['target_agent_emb_size'], args['target_agent_enc_size'], batch_first=True)
 
         # Node encoders
-        self.node_emb = nn.Linear(args['node_feat_size'], args['node_emb_size'])
+        self.node_emb = nn.Linear(args['node_feat_size']+1, args['node_emb_size'])
         self.node_encoder = nn.GRU(args['node_emb_size'], args['node_enc_size'], batch_first=True)
-        
+        self.node_encoder = GATv2(args['num_layers'],args['node_emb_size']*20, args['node_enc_size'], args['node_enc_size'],
+                                         heads=args['num_heads_lanes'], activation=F.leaky_relu, feat_drop=args['feat_drop'], attn_drop=args['attn_drop'], 
+                                         residual=True, negative_slope=0.2) 
+
         # Surrounding agent encoder
         self.nbr_emb = nn.Linear(args['nbr_feat_size'] + 1, args['nbr_emb_size'])
         self.nbr_enc = nn.GRU(args['nbr_emb_size'], args['nbr_enc_size'], batch_first=True)
         
         # Agent interaction (agent||veh_nbr||ped_nbr -» agent_nbr_context) ! 
-        self.interaction_net = GATv2Conv(args['target_agent_enc_size'], args['target_agent_enc_size'], 
-                                         num_heads=args['num_heads'], feat_drop=0., attn_drop=0., share_weights=True,
+        self.interaction_net = GATv2Conv(args['nbr_enc_size'], args['nbr_enc_size'], 
+                                         num_heads=args['num_heads_agents'], feat_drop=0., attn_drop=0., share_weights=True,
                                          residual=True, activation=F.elu, allow_zero_in_degree=True)  
 
         # Agent-node attention
@@ -302,12 +345,6 @@ class PGP_SCOUTEncoder(PredictionEncoder):
         _, target_agent_enc = self.target_agent_enc(target_agent_embedding)
         target_agent_enc = target_agent_enc.squeeze(0) #B,32
 
-        # Encode lane nodes
-        lane_node_feats = inputs['map_representation']['lane_node_feats']
-        lane_node_masks = inputs['map_representation']['lane_node_masks'] 
-        lane_node_embedding = self.leaky_relu(self.node_emb(lane_node_feats))
-        lane_node_enc = self.variable_size_gru_encode(lane_node_embedding, lane_node_masks, self.node_encoder) # B,164,32
-
         # Encode surrounding agents
         nbr_vehicle_feats = inputs['surrounding_agent_representation']['vehicles']
         nbr_vehicle_feats = torch.cat((nbr_vehicle_feats, torch.zeros_like(nbr_vehicle_feats[:, :, :, 0:1])), dim=-1)
@@ -353,12 +390,22 @@ class PGP_SCOUTEncoder(PredictionEncoder):
         # nbr_vehicle_enc = torch.cat((nbr_vehicle_enc, agent_nbr_context[1:1+nbr_vehicle_enc.shape[0]]), dim=-1)
         # nbr_ped_enc = torch.cat((nbr_ped_enc, agent_nbr_context[1+nbr_vehicle_enc.shape[0]:]), dim=-1) 
 
-        """# Encode lane nodes 
+        # Encode lane nodes
+        """lane_node_feats = inputs['map_representation']['lane_node_feats']
+        lane_node_masks = inputs['map_representation']['lane_node_masks'] 
+        lane_node_embedding = self.leaky_relu(self.node_emb(lane_node_feats))
+        lane_node_enc = self.variable_size_gru_encode(lane_node_embedding, lane_node_masks, self.node_encoder) # B,164,32
+        """
+        # Encode lane nodes 
         lanes_graphs = inputs['lanes_graphs'].to(target_agent_feats.device) 
         lane_node_feats = inputs['map_representation']['lane_node_feats']
         lane_node_masks = inputs['map_representation']['lane_node_masks'] 
-        lane_node_enc = self.lane_node_emb(lane_node_feats, lane_node_masks)  """
-        
+        lane_node_feats = torch.cat((lane_node_feats, lane_node_masks[:,:,:,:1]), dim=-1)
+        lane_node_embedding = self.leaky_relu(self.node_emb(lane_node_feats)) 
+        lane_node_embedding = lane_node_embedding.view(lane_node_embedding.shape[0], lane_node_embedding.shape[1], -1) # B,164,32
+        lane_node_enc = self.node_encoder(lanes_graphs, lane_node_embedding) 
+        lane_node_enc = lane_node_enc.view(lane_node_embedding.shape[0], lane_node_embedding.shape[1], -1) # B,164,32
+
         # Agent-node attention (between nbrs and lanes)  
         veh_interaction_feats = torch.cuda.FloatTensor(interaction_feats.shape[0],nbr_vehicle_feats.shape[1], interaction_feats.shape[-1])
         ped_interaction_feats = torch.cuda.FloatTensor(interaction_feats.shape[0],nbr_ped_feats.shape[1], interaction_feats.shape[-1]) 
@@ -378,9 +425,9 @@ class PGP_SCOUTEncoder(PredictionEncoder):
 
         # GAT layers
         # Build adj matrix - treat succ and prox edges as equivalent and bidirectional
-        adj_mat = self.build_adj_mat(inputs['map_representation']['s_next'], inputs['map_representation']['edge_type'])
+        """adj_mat = self.build_adj_mat(inputs['map_representation']['s_next'], inputs['map_representation']['edge_type'])
         for gat_layer in self.gat:
-            lane_node_enc += gat_layer(lane_node_enc, adj_mat)
+            lane_node_enc += gat_layer(lane_node_enc, adj_mat) """
 
         # Lane node masks
         lane_node_masks = ~lane_node_masks[:, :, :, 0].bool()

@@ -3,7 +3,7 @@ dataset: 'nuScenes'
 version: 'v1.0-trainval'
 agent_setting: 'single_agent'
 input_representation: 'graphs'
-name: 'cluster 5'
+name: 'PGP Encoder + Interaction net - No final GAT'
 
 train_set_args: &ds_args
   split: 'train'
@@ -33,7 +33,11 @@ encoder_args:
   target_agent_feat_size: 5
   target_agent_emb_size: 16
   target_agent_enc_size: 32
-  num_heads: 1
+  num_heads_agents: 1
+  num_heads_lanes: [1, 1, 1]
+  feat_drop: 0.0
+  attn_drop: 0.0
+  num_layers: 3
   node_feat_size: 6
   node_emb_size: 16
   node_enc_size: 64
@@ -44,6 +48,7 @@ encoder_args:
   agent_mask_prob_v: 0
   agent_mask_prob_p: 0
   lane_mask_prob: 0.
+  num_heads: 1
 
 
 # Aggregator parameters
@@ -51,9 +56,9 @@ aggregator_type: 'pgp'
 aggregator_args:
   pre_train: True
   target_agent_enc_size: 32
-  node_enc_size: 32
-  pi_h1_size: 32
-  pi_h2_size: 32
+  node_enc_size: 64
+  pi_h1_size: 64
+  pi_h2_size: 64
   horizon: 15
   num_samples: 1000
   emb_size: 128

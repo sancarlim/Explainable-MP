@@ -38,7 +38,7 @@ class Trainer:
 
         # Initialize dataloaders
         if 'scout' in cfg['encoder_type']:
-            collate_fn = u.collate_fn_dgl
+            collate_fn = u.collate_fn_dgl_lanes
         else:
             collate_fn = None
         self.tr_dl = torch_data.DataLoader(datasets['train'], cfg['batch_size'], shuffle=True,

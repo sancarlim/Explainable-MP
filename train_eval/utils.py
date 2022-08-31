@@ -55,11 +55,13 @@ def convert2tensors(data):
 
 
 def collate_fn_dgl(batch): 
-    # Collate function for dataloader.
-    adj_matrix = [element['inputs']['surrounding_agent_representation']['adj_matrix'] for element in batch]
-    len_adj = [element['inputs']['surrounding_agent_representation']['len_adj'] for element in batch]
-    adj_matrix = [adj[:len, :len] for adj, len in zip(adj_matrix, len_adj)]
-    graphs = [dgl.from_scipy(spp.coo_matrix(adj)).int() for adj in adj_matrix]
+    # Collate function for dataloader. 
+    graphs = []
+    for element in batch:        
+        adj = element['inputs']['surrounding_agent_representation']['adj_matrix'] 
+        len_adj = element['inputs']['surrounding_agent_representation']['len_adj']  
+        adj_matrix = adj[:len_adj, :len_adj]
+        graphs.append(dgl.from_scipy(spp.coo_matrix(adj_matrix)).int())
     #[dgl.graph((s,d)) for s,d in zip(src,dst)] 
     # graphs = [dgl.add_self_loop(graph) for graph in graphs]
     interaction_batched_graph = dgl.batch(graphs)
@@ -73,4 +75,67 @@ def collate_fn_dgl(batch):
     data = default_collate(batch)
     data['inputs']['interaction_graphs'] = interaction_batched_graph
     #data['inputs']['lanes_graphs'] = lanes_batched_graph
+    return data
+
+def collate_fn_dgl_lanes(batch): 
+    # Collate function for dataloader. 
+    graphs = []
+    lanes_graphs = []
+    for element in batch:        
+        # Create interaction graph
+        adj = element['inputs']['surrounding_agent_representation']['adj_matrix'] 
+        len_adj = element['inputs']['surrounding_agent_representation']['len_adj']  
+        adj_matrix = adj[:len_adj, :len_adj]
+        graphs.append(dgl.from_scipy(spp.coo_matrix(adj_matrix)).int())
+        # Create lanes graph  
+        adj_lanes = element['inputs']['map_representation']['adj_matrix']
+        lane_graph = dgl.add_self_loop(dgl.from_scipy(spp.coo_matrix(adj_lanes)).int())
+        lanes_graphs.append(lane_graph)
+
+    interaction_batched_graph = dgl.batch(graphs)
+    lanes_batched_graph = dgl.batch(lanes_graphs)
+    data = default_collate(batch)
+    data['inputs']['interaction_graphs'] = interaction_batched_graph
+    data['inputs']['lanes_graphs'] = lanes_batched_graph
+    return data
+
+
+def collate_fn_dgl_hetero(batch): 
+    # Collate function for dataloader.
+    interaction_graphs = []
+    lanes_graphs = []
+    for element in batch:        
+        # Interaction graph
+        adj = element['inputs']['surrounding_agent_representation']['adj_matrix'] 
+        len_adj = element['inputs']['surrounding_agent_representation']['len_adj']  
+        adj_matrix = adj[:len_adj, :len_adj]
+        interaction_graphs.append(dgl.from_scipy(spp.coo_matrix(adj_matrix)).int())
+        # Lane graph
+        succ_adj_matrix = element['inputs']['map_representation']['succ_adj_matrix'] 
+        prox_adj_matrix = element['inputs']['map_representation']['prox_adj_matrix']
+        # TODO: Do it in preprocess, save succ_u, succ_v, prox_u, prox_v in data. For batching they need to have the same length.
+        succ_u = np.array([])
+        succ_v = np.array([])
+        for i, count in enumerate(np.count_nonzero(succ_adj_matrix, axis=1)):
+            if count != 0:
+                succ_u = np.append(succ_u,[i]*count)
+                succ_v = np.append(succ_v, np.nonzero(succ_adj_matrix[i])[0])
+        prox_u = np.array([])
+        prox_v = np.array([])
+        for i, count in enumerate(np.count_nonzero(prox_adj_matrix, axis=1)):
+            if count != 0:
+                prox_u = np.append(prox_u,[i]*count)
+                prox_v = np.append(prox_v, np.nonzero(prox_adj_matrix[i])[0]) 
+        lanes_graphs.append(
+            dgl.heterograph({
+            ('l','successor','l'): (torch.tensor(succ_u, dtype=torch.int), torch.tensor(succ_v, dtype=torch.int)),
+            ('l','proximal','l'):  (torch.tensor(prox_u, dtype=torch.int), torch.tensor(prox_v, dtype=torch.int))
+        }) )
+        
+    interaction_batched_graph = dgl.batch(interaction_graphs)
+    lanes_batched_graph = dgl.batch(lanes_graphs) 
+
+    data = default_collate(batch)
+    data['inputs']['interaction_graphs'] = interaction_batched_graph
+    data['inputs']['lanes_graphs'] = lanes_batched_graph
     return data
