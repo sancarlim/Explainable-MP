@@ -37,7 +37,7 @@ class Trainer:
         datasets = {'train': train_set, 'val': val_set}
 
         # Initialize dataloaders
-        if cfg['encoder_type'] == 'scout_encoder':
+        if 'scout' in cfg['encoder_type']:
             collate_fn = u.collate_fn_dgl
         else:
             collate_fn = None
@@ -291,7 +291,8 @@ class Trainer:
         """
         for metric_name, metric_val in minibatch_metrics.items():
             self.writer.add_scalar('train/' + metric_name, metric_val, self.tb_iters)
-            self.wandb_writer.log({'train/'+ metric_name: metric_val, 'epoch': self.current_epoch, 'batch': self.tb_iters}) 
+            if self.wandb_writer is not None:
+                self.wandb_writer.log({'train/'+ metric_name: metric_val, 'epoch': self.current_epoch, 'batch': self.tb_iters}) 
         self.tb_iters += 1
 
     def log_tensorboard_val(self, epoch_metrics):
@@ -302,5 +303,6 @@ class Trainer:
             if metric_name != 'minibatch_count' and metric_name != 'time_elapsed':
                 metric_val /= epoch_metrics['minibatch_count']
                 self.writer.add_scalar('val/' + metric_name, metric_val, self.tb_iters)
-                self.wandb_writer.log({'val/' + metric_name: metric_val, 'epoch': self.current_epoch, 'batch': self.tb_iters})
+                if self.wandb_writer is not None:
+                    self.wandb_writer.log({'val/' + metric_name: metric_val, 'epoch': self.current_epoch, 'batch': self.tb_iters})
 

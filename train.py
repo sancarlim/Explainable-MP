@@ -13,6 +13,8 @@ parser.add_argument("-d", "--data_dir", help="Directory to extract data", requir
 parser.add_argument("-o", "--output_dir", help="Directory to save checkpoints and logs", required=True)
 parser.add_argument("-n", "--num_epochs", help="Number of epochs to run training for", required=True)
 parser.add_argument("-w", "--checkpoint", help="Path to pre-trained or intermediate checkpoint", required=False)
+parser.add_argument('--nowandb', action='store_true', help='use this flag to DISABLE wandb logging')  
+
 args = parser.parse_args()
 
 
@@ -34,7 +36,9 @@ with open(args.config, 'r') as yaml_file:
 writer = SummaryWriter(log_dir=os.path.join(args.output_dir, 'tensorboard_logs'))
 
 # Initialize wandb loger
-wandb_logger = wandb.init(job_type="training", entity='sandracl72', project='nuscenes_pgp',
+wandb_logger = None
+if not args.nowandb:
+    wandb_logger = wandb.init(job_type="training", entity='sandracl72', project='nuscenes_pgp',
                             config=cfg, sync_tensorboard=True, name=cfg['name']) 
 
 # Train
