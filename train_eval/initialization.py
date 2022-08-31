@@ -13,6 +13,7 @@ from models.encoders.raster_encoder import RasterEncoder
 from models.encoders.polyline_subgraph import PolylineSubgraphs
 from models.encoders.pgp_encoder import PGPEncoder
 from models.encoders.scout_encoder import SCOUTEncoder
+from models.encoders.pgp_scout_encoder import PGP_SCOUTEncoder
 from models.aggregators.concat import Concat
 from models.aggregators.global_attention import GlobalAttention
 from models.aggregators.goal_conditioned import GoalConditioned
@@ -86,6 +87,7 @@ def initialize_encoder(encoder_type: str, encoder_args: Dict):
         'polyline_subgraphs': PolylineSubgraphs,
         'pgp_encoder': PGPEncoder,
         'scout_encoder': SCOUTEncoder,
+        'pgp_scout_encoder': PGP_SCOUTEncoder
     }
 
     return encoder_mapping[encoder_type](encoder_args)

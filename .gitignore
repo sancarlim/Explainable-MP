@@ -145,8 +145,7 @@ apollo_test_data.pkl
 *.sh
 *workspace
 *.json
-*.txt
-*.yml
+*.txt 
 *env.yaml
 *.png    
 
@@ -155,8 +154,7 @@ apollo_test_data.pkl
 *.avi
 *.zip
 
-events*
-.yml
+events* 
 .pyc
 .txt
 *.gif

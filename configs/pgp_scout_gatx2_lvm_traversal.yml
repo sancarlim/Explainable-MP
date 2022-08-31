@@ -28,14 +28,15 @@ test_set_args:
 batch_size: 64
 num_workers: 64
   
-encoder_type: 'pgp_encoder'
+encoder_type: 'pgp_scout_encoder'
 encoder_args:
   target_agent_feat_size: 5
   target_agent_emb_size: 16
   target_agent_enc_size: 32
+  num_heads: 1
   node_feat_size: 6
   node_emb_size: 16
-  node_enc_size: 32
+  node_enc_size: 64
   nbr_feat_size: 5
   nbr_emb_size: 16
   nbr_enc_size: 32

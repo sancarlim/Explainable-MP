@@ -3,7 +3,6 @@ dataset: 'nuScenes'
 version: 'v1.0-trainval'
 agent_setting: 'single_agent'
 input_representation: 'graphs'
-name: 'cluster 5'
 
 train_set_args: &ds_args
   split: 'train'
@@ -40,9 +39,6 @@ encoder_args:
   nbr_emb_size: 16
   nbr_enc_size: 32
   num_gat_layers: 2
-  agent_mask_prob_v: 0
-  agent_mask_prob_p: 0
-  lane_mask_prob: 0.
 
 
 # Aggregator parameters
@@ -57,13 +53,22 @@ aggregator_args:
   num_samples: 1000
   emb_size: 128
   num_heads: 32 
+
+# Aggregator parameters
+aggregator_type: 'global_attention'
+aggregator_args: 
+  target_agent_enc_size: 32
+  context_enc_size: 32
+  emb_size: 128
+  num_heads: 32
  
 
 # Decoder parameters
-decoder_type: 'lvm'
-decoder_args:
-  num_samples: 1000
+decoder_type: 'mtp'
+decoder_args: 
+  num_modes: 5
   op_len: 12
+  use_variance: True
   hidden_size: 128
   encoding_size: 160
   agg_type: 'sample_specific'
