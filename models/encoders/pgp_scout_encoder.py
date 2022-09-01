@@ -5,7 +5,7 @@ import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence
 from typing import Dict, List
 from torch import Tensor
-from models.layers import Res1d, Conv1d, MLP, GlobalGraph, LayerNorm
+from models.heterograph_models import HGT
 import torch.nn.functional as F 
 from dgl import DGLError
 from dgl.nn import GATv2Conv 
@@ -282,10 +282,18 @@ class PGP_SCOUTEncoder(PredictionEncoder):
 
         # Node encoders
         self.node_emb = nn.Linear(args['node_feat_size']+1, args['node_emb_size'])
-        self.node_encoder = nn.GRU(args['node_emb_size'], args['node_enc_size'], batch_first=True)
-        self.node_encoder = GATv2(args['num_layers'],args['node_emb_size']*20, args['node_enc_size'], args['node_enc_size'],
-                                         heads=args['num_heads_lanes'], activation=F.elu, feat_drop=args['feat_drop'], attn_drop=args['attn_drop'], 
-                                         residual=True, negative_slope=0.2) 
+        # PGP encoder
+        #self.node_encoder = nn.GRU(args['node_emb_size'], args['node_enc_size'], batch_first=True)
+
+        if not args['heterograph']:
+            # Lane GAT (homograph)
+            self.node_encoder = GATv2(args['num_layers'],args['node_emb_size']*20, args['node_enc_size'], args['node_enc_size'],
+                                            heads=args['num_heads_lanes'], activation=F.elu, feat_drop=args['feat_drop'], attn_drop=args['attn_drop'], 
+                                            residual=True, negative_slope=0.2) 
+        else:
+            # HeteroGraph Transformer
+            self.node_encoder = HGT({'l':0}, {'proximal':0, 'successor':1}, args['node_emb_size']*20, args['node_enc_size'], 
+                                    args['node_enc_size'], args['num_layers'], args['num_heads_lanes'], use_norm=True)
 
         # Surrounding agent encoder
         self.nbr_emb = nn.Linear(args['nbr_feat_size'] + 1, args['nbr_emb_size'])

@@ -38,7 +38,7 @@ class Trainer:
 
         # Initialize dataloaders
         if 'scout' in cfg['encoder_type']:
-            collate_fn = u.collate_fn_dgl_lanes
+            collate_fn = u.collate_fn_dgl_hetero
         else:
             collate_fn = None
         self.tr_dl = torch_data.DataLoader(datasets['train'], cfg['batch_size'], shuffle=True,
@@ -79,6 +79,14 @@ class Trainer:
         self.tb_iters = 0
         
         self.wandb_writer = wandb_writer
+        if self.wandb_writer is not None:
+            self.wandb_writer.watch(
+                        self.model,
+                        criterion=self.val_metric,
+                        log= None,
+                        log_freq = 1000, 
+                        log_graph= True
+                    )
 
         # Load checkpoint if checkpoint path is provided
         if checkpoint_path is not None:

@@ -37,7 +37,7 @@ encoder_args:
   num_heads_lanes: [1, 1, 1,1]
   feat_drop: 0.0
   attn_drop: 0.0
-  num_layers: 4
+  num_layers: 2
   node_feat_size: 6
   node_emb_size: 16
   node_enc_size: 64
@@ -49,6 +49,7 @@ encoder_args:
   agent_mask_prob_p: 0
   lane_mask_prob: 0.
   num_heads: 1
+  heterograph: True
 
 
 # Aggregator parameters
