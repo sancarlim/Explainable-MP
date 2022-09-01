@@ -89,11 +89,14 @@ def collate_fn_dgl_lanes(batch):
         graphs.append(dgl.from_scipy(spp.coo_matrix(adj_matrix)).int())
         # Create lanes graph  
         adj_lanes = element['inputs']['map_representation']['adj_matrix']
-        lane_graph = dgl.add_self_loop(dgl.from_scipy(spp.coo_matrix(adj_lanes)).int())
+        lane_masks = element['inputs']['map_representation']['lane_node_masks'] # 164 x 20
+        len_adj_lanes = np.count_nonzero((~(lane_masks[:,:,0]!=0)).any(-1)) # 164
+        adj_matrix_lanes = adj_lanes[:len_adj_lanes, :len_adj_lanes]
+        lane_graph = dgl.add_self_loop(dgl.from_scipy(spp.coo_matrix(adj_matrix_lanes)).int())
         lanes_graphs.append(lane_graph)
 
-    interaction_batched_graph = dgl.batch(graphs)
-    lanes_batched_graph = dgl.batch(lanes_graphs)
+    interaction_batched_graph = dgl.batch(graphs) 
+    lanes_batched_graph = dgl.batch(lanes_graphs) 
     data = default_collate(batch)
     data['inputs']['interaction_graphs'] = interaction_batched_graph
     data['inputs']['lanes_graphs'] = lanes_batched_graph

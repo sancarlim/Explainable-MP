@@ -128,19 +128,18 @@ class NuScenesGraphs(NuScenesVector):
         s_next, edge_type = self.get_edge_lookup(e_succ, e_prox)
 
         # Build adjacency matrix for heterograph - treating succ and prox edges separately and directional 
-        lanes_adj_matrix = self.build_adj_mat_directional_with_types(s_next, edge_type)
+        succ_adj_matrix, prox_adj_matrix = self.build_adj_mat_directional_with_types(s_next, edge_type)
         
-
         # Convert list of lane node feats to fixed size numpy array and masks
         lane_node_feats, lane_node_masks = self.list_to_tensor(lane_node_feats, self.max_nodes, self.polyline_length, 6)
 
         map_representation = {
             'lane_node_feats': lane_node_feats,
-            'lane_node_masks': lane_node_masks,
-            'lane_ids': lane_ids,
+            'lane_node_masks': lane_node_masks, 
             's_next': s_next,
             'edge_type': edge_type, 
-            'adj_matrix': lanes_adj_matrix
+            'succ_adj_matrix': succ_adj_matrix,
+            'prox_adj_matrix': prox_adj_matrix
         }
 
         return map_representation
@@ -148,11 +147,23 @@ class NuScenesGraphs(NuScenesVector):
     @staticmethod
     def build_adj_mat_directional_with_types(edges, edges_type):
         # Given edges [B, number of nodes, edges per node] create adjacency matrix [B, number of nodes, number of nodes]
-        edges_adj = np.zeros((edges.shape[0], edges.shape[0])) 
+        edges_succ_adj = np.zeros((edges.shape[0], edges.shape[0])) 
+        edges_prox_adj = np.zeros((edges.shape[0], edges.shape[0])) 
+        succ_u = np.array([])
+        succ_v = np.array([])
+        prox_u = np.array([])
+        prox_v = np.array([])
         for i in range(edges.shape[0]):
             for j in range(edges.shape[1]-1):
-                edges_adj[i,int(edges[i,j])] = edges_type[i,j]
-        return edges_adj
+                if edges_type[i,j] == 1:
+                    succ_u = np.append(succ_u, i)
+                    succ_v = np.append(succ_v, j)
+                    edges_succ_adj[i,int(edges[i,j])] = 1
+                elif edges_type[i,j] == 2:
+                    prox_u = np.append(prox_u, i)
+                    prox_v = np.append(prox_v, j)
+                    edges_prox_adj[i,int(edges[i,j])] = 1
+        return edges_succ_adj, edges_prox_adj
     
     @staticmethod
     def get_successor_edges(lane_ids: List[str], map_api: NuScenesMap) -> List[List[int]]:

@@ -3,7 +3,7 @@ dataset: 'nuScenes'
 version: 'v1.0-trainval'
 agent_setting: 'single_agent'
 input_representation: 'graphs'
-name: 'PGP Encoder + Interaction net - No final GAT'
+name: 'PGP + Interactor + Lane GAT Encoder (masked + elu instead of LeakyReLU)'
 
 train_set_args: &ds_args
   split: 'train'
@@ -25,8 +25,8 @@ test_set_args:
   split: 'val'
   random_flips: False
 
-batch_size: 64
-num_workers: 64
+batch_size: 16
+num_workers: 128
   
 encoder_type: 'pgp_scout_encoder'
 encoder_args:
@@ -34,10 +34,10 @@ encoder_args:
   target_agent_emb_size: 16
   target_agent_enc_size: 32
   num_heads_agents: 1
-  num_heads_lanes: [1, 1, 1]
+  num_heads_lanes: [1, 1, 1,1]
   feat_drop: 0.0
   attn_drop: 0.0
-  num_layers: 3
+  num_layers: 4
   node_feat_size: 6
   node_emb_size: 16
   node_enc_size: 64
