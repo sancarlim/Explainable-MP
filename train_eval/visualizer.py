@@ -8,7 +8,7 @@ from nuscenes.prediction.input_representation.static_layers_original import Stat
 from nuscenes.prediction.input_representation.agents import AgentBoxesWithFadedHistory
 from nuscenes.prediction.input_representation.interface_original import InputRepresentation
 from nuscenes.prediction.input_representation.combinators import Rasterizer
-from nuscenes.prediction.helper import convert_local_coords_to_global
+from nuscenes.prediction.helper import convert_local_coords_to_global, convert_global_coords_to_local
 import train_eval.utils as u
 import imageio
 import os
@@ -109,12 +109,13 @@ class Visualizer:
         if not os.path.isdir(os.path.join(output_dir, 'results', 'gifs')):
             os.mkdir(os.path.join(output_dir, 'results', 'gifs'))
         start = time.time()
-        for n, indices in enumerate(index_list[:1]):
-            imgs, fancy_img, img_lane_mask, graph_img, scene = self.generate_nuscenes_gif(indices)
-            filename = os.path.join(output_dir, 'results', 'gifs', 'example' + str(n) + scene  + '_fancy.gif')
+        for n, indices in enumerate(index_list[9:10]):
+            imgs, fancy_img, graph_img, scene = self.generate_nuscenes_gif(indices)
+            filename = os.path.join(output_dir, 'example' + str(n) + scene  + '_fancy.gif')
             imageio.mimsave(filename, fancy_img, format='GIF', fps=2)  
-            filename = os.path.join(output_dir, 'results', 'gifs', 'example' + str(n) + scene  + '_lane_mask.png')
-            #plt.imsave(filename, img_lane_mask)
+            for i,img in enumerate(fancy_img):
+                filename = os.path.join(output_dir, 'example' + str(n) + scene  + '_' + str(i) +'_perframe.png')
+                plt.imsave(filename, img) 
             """ filename = os.path.join(output_dir, 'results', 'gifs', 'example' + str(n) + scene + '.gif')
             imageio.mimsave(filename, imgs, format='GIF', fps=2)
             filename = os.path.join(output_dir, 'results', 'gifs', 'example' + str(n) + scene  + '_graph.gif')
@@ -212,9 +213,9 @@ class Visualizer:
         
         imgs = []
         imgs_fancy = []
-        graph_img = []
-        veh_token = ''
-        for idx in idcs[:4]: 
+        graph_img = [] 
+        vehicle_masked_t = []
+        for idx in idcs[:]: 
             # Load data
             data = self.ds[idx]
             data = u.send_to_device(u.convert_double_to_float(u.convert2tensors(data)))
@@ -268,19 +269,20 @@ class Visualizer:
             # mask out vehicles of interest
             if idx == idcs[0]:
                 #mask_out = np.random.binomial(1, 0., len(annotations))
-                vehicle_masked_t = [] #annotations[7]['instance_token']#[annotations[i]['instance_token'] for i in range(len(annotations)) if 'vehicle' in annotations[i]['category_name'] and annotations[i]['instance_token']!=i_t and mask_out[i]]
+                vehicle_masked_t = annotations[7]['instance_token']#[annotations[i]['instance_token'] for i in range(len(annotations)) if 'vehicle' in annotations[i]['category_name'] and annotations[i]['instance_token']!=i_t and mask_out[i]]
                 mask_vehicles = []
                 for i in range(len(annotations)):
                     if 'vehicle' in annotations[i]['category_name'] and annotations[i]['instance_token']!=i_t:
                         if annotations[i]['instance_token'] in vehicle_masked_t:
                             mask_vehicles.append(1)
                         else:
-                            mask_vehicles.append(0)
+                            mask_vehicles.append(0) 
                
                 #[mask_out[i] for i in range(len(annotations)) if 'vehicle' in annotations[i]['category_name'] and annotations[i]['instance_token']!=i_t]
             else:
                 mask_vehicles = [1 if annotations[i]['instance_token'] in vehicle_masked_t else 0 for i in range(len(annotations)) if 'vehicle' in annotations[i]['category_name'] and annotations[i]['instance_token']!=i_t]
             data['inputs']['surrounding_agent_representation']['vehicle_masks'][0,:len(mask_vehicles)] += torch.tensor(mask_vehicles).unsqueeze(-1).unsqueeze(-1).repeat(1,5,5).to(device)
+            data['inputs']['agent_node_masks']['vehicles'][:,:,:len(mask_vehicles)] += torch.tensor(mask_vehicles).unsqueeze(0).unsqueeze(1).repeat(1,164,1).to(device)
             
             for n, ann in enumerate(annotations):
                 if ann['instance_token'] in vehicle_masked_t and ann['instance_token']!=i_t:
@@ -291,18 +293,25 @@ class Visualizer:
                 else:
                     history = np.array([ann['translation'][:2]])
                 
-                if n == 0 and idx == idcs[0]:
+                if False: #n == 5:
                     # Vehicle n=0 is stopped 
                     veh_token = ann['instance_token']
-                    history_fict = future[i_t][-6:-5] 
+                    history_fict = future[i_t][-6:-1]
                     history = np.array(history_fict )
                     feature = torch.zeros_like(data['inputs']['surrounding_agent_representation']['vehicles'][:,n,:,:])
-                    feature[:,:,:2] = data['ground_truth']['traj'][:,-6].repeat(data['inputs']['surrounding_agent_representation']['vehicles'][0,n,:,:].shape[0],1)
+                    feature[:,:,:2] = data['ground_truth']['traj'][:,-6:-1]
+                    feature[:,:,2:] = data['inputs']['target_agent_representation'][:,-1,2:].repeat(1,5,1)
                     data['inputs']['surrounding_agent_representation']['vehicles'][:,n,:,:] = feature
-                elif ann['instance_token'] == veh_token:
+                elif False: #ann['instance_token'] == veh_token:
                     history = history_fict
                     data['inputs']['surrounding_agent_representation']['vehicles'][:,n,:,:] = feature 
-                
+                elif False: #n==14:
+                    # change bycicle trajectory
+                    history = history - (history[-1]-history[0])*1.3
+                    future[ann['instance_token']] = future[ann['instance_token']] - (history[-1]-history[0])*1.3
+                    feature = data['inputs']['surrounding_agent_representation']['vehicles'][:,4,:,:]
+                    feature[:,:,:2] = torch.tensor(convert_global_coords_to_local(history, annotations[36]['translation'], annotations[36]['rotation']), device=device)
+                    data['inputs']['surrounding_agent_representation']['vehicles'][:,4,:,:] = feature
                 ax2.plot(history[:, 0], history[:, 1], 'k--')
 
                 #Plot future
@@ -321,7 +330,7 @@ class Visualizer:
                     oi = OffsetImage(r_img, zoom=0.01, zorder=500)
                     veh_box = AnnotationBbox(oi, (history[-1, 0], history[-1, 1]), frameon=False)
                     veh_box.zorder = 800
-                    ax2.add_artist(veh_box) 
+                    ax2.add_artist(veh_box)                     
                 elif ann['category_name'].split('.')[1] == 'motorcycle' or ann['category_name'].split('.')[1] == 'bicycle':
                     circle = plt.Circle((history[-1, 0],
                                 history[-1, 1]),
@@ -331,7 +340,7 @@ class Visualizer:
                                 lw=circle_edge_width,
                                 zorder=3)
                     ax2.add_artist(circle)
-                elif ann['category_name'].split('.')[0] == 'vehicle':
+                elif ann['category_name'].split('.')[0] == 'vehicle': 
                     r_img = rotate(cars, quaternion_yaw(Quaternion(ann['rotation']))*180/math.pi,reshape=True)
                     oi = OffsetImage(r_img, zoom=0.01, zorder=5)
                     veh_box = AnnotationBbox(oi, (history[-1, 0], history[-1, 1]), frameon=False)
@@ -348,9 +357,41 @@ class Visualizer:
                                 zorder=3)
                     ax2.add_artist(circle)
                 
-
+            # Include fictitious agent
+            """if idx < idcs[7]:
+                fict_idx = 7
+            elif idx > idcs[6]:
+                fict_idx = 3  
+            fict_idx = 5
+            history_fict = np.repeat(future[i_t][fict_idx:fict_idx+1],5,0)
+            future_fict = np.repeat(future[i_t][fict_idx:fict_idx+1],12,0)
+            ax2.plot(history_fict[:, 0], history_fict[:, 1], 'k--')
+            ax2.plot(future_fict[:, 0], future_fict[:, 1], 'w--')
+            r_img = rotate(cars, quaternion_yaw(Quaternion(ann['rotation']))*180/math.pi,reshape=True)
+            rotation_fict = ann['rotation']
+            oi = OffsetImage(r_img, zoom=0.01, zorder=5)
+            veh_box = AnnotationBbox(oi, (history_fict[-1, 0], history_fict[-1, 1]), frameon=False)
+            veh_box.zorder = 5
+            ax2.add_artist(veh_box)                 
+            feature_fict = torch.zeros_like(data['inputs']['surrounding_agent_representation']['vehicles'][:,len(mask_vehicles),:,:])
+            feature_fict[:,:,:2] = data['ground_truth']['traj'][:,fict_idx:fict_idx+1].repeat(1,5,1)
+            #feature[:,-2:,2:] = data['inputs']['target_agent_representation'][:,-1,2:].repeat(1,2,1)
+            data['inputs']['surrounding_agent_representation']['vehicles'][:,len(mask_vehicles),:,:] = feature_fict
+            data['inputs']['surrounding_agent_representation']['vehicle_masks'][:,len(mask_vehicles),:,:] = torch.zeros_like(data['inputs']['surrounding_agent_representation']['vehicle_masks'][:,len(mask_vehicles),:,:])
+            data['inputs']['agent_node_masks']['vehicles'][:,:,len(mask_vehicles)] = torch.zeros_like(data['inputs']['agent_node_masks']['vehicles'][:,:,len(mask_vehicles)])
+            if False:
+                ax2.plot(history_fict[:, 0], history_fict[:, 1], 'k--')
+                ax2.plot(future_fict[:, 0], future_fict[:, 1], 'w--')
+                r_img = rotate(cars, quaternion_yaw(Quaternion(rotation_fict))*180/math.pi,reshape=True)
+                oi = OffsetImage(r_img, zoom=0.01, zorder=5)
+                veh_box = AnnotationBbox(oi, (history_fict[-1, 0], history_fict[-1, 1]), frameon=False)
+                veh_box.zorder = 5
+                ax2.add_artist(veh_box)
+                data['inputs']['surrounding_agent_representation']['vehicles'][:,n,:,:] = feature_fict
+                data['inputs']['surrounding_agent_representation']['vehicle_masks'][:,n,:,:] = torch.zeros_like(data['inputs']['surrounding_agent_representation']['vehicle_masks'][:,n,:,:])
+            
             # Get raster map
-            """ hd_map = self.raster_maps.make_input_representation(i_t, s_t, pose_record)
+            hd_map = self.raster_maps.make_input_representation(i_t, s_t, pose_record)
             r, g, b = hd_map[:, :, 0] / 255, hd_map[:, :, 1] / 255, hd_map[:, :, 2] / 255
             hd_map_gray = 0.2989 * r + 0.5870 * g + 0.1140 * b """
 
@@ -431,9 +472,7 @@ class Visualizer:
             fig2.canvas.draw()
             image_from_plot = np.frombuffer(fig2.canvas.tostring_rgb(), dtype=np.uint8) 
             image_from_plot = image_from_plot.reshape(fig2.canvas.get_width_height()[::-1] + (3,))
-            imgs_fancy.append(image_from_plot)  
-            if idx == idcs[0]:
-                img_lane_mask = image_from_plot
+            imgs_fancy.append(image_from_plot)   
             
             plt.close(fig2) 
 
@@ -443,4 +482,4 @@ class Visualizer:
             graph_img.append(image_from_plot)
             plt.close(fig3) """
 
-        return imgs, imgs_fancy, img_lane_mask, graph_img, scene_name
+        return imgs, imgs_fancy,graph_img, scene_name
