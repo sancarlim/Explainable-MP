@@ -30,15 +30,12 @@ ego_car = plt.imread('/media/14TBDISK/sandra//DBU_Graph/NuScenes/icons/Car TOP_V
 agent = plt.imread('/media/14TBDISK/sandra/DBU_Graph/NuScenes/icons/Car TOP_VIEW 375397.png')
 cars = plt.imread('/media/14TBDISK/sandra/DBU_Graph/NuScenes/icons/Car TOP_VIEW 80CBE5.png') 
 
-layers = ['drivable_area',
-          'road_segment',
+layers = ['drivable_area', 
           'lane',
+          'road_segment',
+          'road_block',
           'ped_crossing',
-          'walkway',
-          'stop_line',
-          'carpark_area',
-          'stop_line',
-          'road_divider',
+          'walkway', 
           'lane_divider']
 
 
@@ -109,7 +106,7 @@ class Visualizer:
         if not os.path.isdir(os.path.join(output_dir, 'results', 'gifs')):
             os.mkdir(os.path.join(output_dir, 'results', 'gifs'))
         start = time.time()
-        for n, indices in enumerate(index_list[9:10]):
+        for n, indices in enumerate(index_list[5:6]):
             imgs, fancy_img, graph_img, scene = self.generate_nuscenes_gif(indices)
             filename = os.path.join(output_dir, 'example' + str(n) + scene  + '_fancy.gif')
             imageio.mimsave(filename, fancy_img, format='GIF', fps=2)  
@@ -210,7 +207,6 @@ class Visualizer:
         location = log['location']
         nusc_map = NuScenesMap(dataroot=self.dataroot, map_name=location)
         
-        
         imgs = []
         imgs_fancy = []
         graph_img = [] 
@@ -267,7 +263,7 @@ class Visualizer:
             ax2.add_artist(veh_box)
 
             # mask out vehicles of interest
-            if idx == idcs[0]:
+            """if idx == idcs[0]:
                 #mask_out = np.random.binomial(1, 0., len(annotations))
                 vehicle_masked_t = annotations[7]['instance_token']#[annotations[i]['instance_token'] for i in range(len(annotations)) if 'vehicle' in annotations[i]['category_name'] and annotations[i]['instance_token']!=i_t and mask_out[i]]
                 mask_vehicles = []
@@ -283,7 +279,7 @@ class Visualizer:
                 mask_vehicles = [1 if annotations[i]['instance_token'] in vehicle_masked_t else 0 for i in range(len(annotations)) if 'vehicle' in annotations[i]['category_name'] and annotations[i]['instance_token']!=i_t]
             data['inputs']['surrounding_agent_representation']['vehicle_masks'][0,:len(mask_vehicles)] += torch.tensor(mask_vehicles).unsqueeze(-1).unsqueeze(-1).repeat(1,5,5).to(device)
             data['inputs']['agent_node_masks']['vehicles'][:,:,:len(mask_vehicles)] += torch.tensor(mask_vehicles).unsqueeze(0).unsqueeze(1).repeat(1,164,1).to(device)
-            
+            """
             for n, ann in enumerate(annotations):
                 if ann['instance_token'] in vehicle_masked_t and ann['instance_token']!=i_t:
                     continue 
@@ -425,6 +421,8 @@ class Visualizer:
                 data['inputs']['graphs'] = graphs
             
             predictions = self.model(data['inputs'])
+            predictions['probs'][0], probs_ord_idcs = predictions['probs'].sort(descending=True)
+            predictions['traj'][0] = predictions['traj'][0][probs_ord_idcs]
 
             # Plot
             """ fig, ax = plt.subplots(1, 3, figsize=(15, 5))
@@ -437,7 +435,7 @@ class Visualizer:
             sm_cool = plt.cm.ScalarMappable(cmap=cmap_cool , norm=plt.Normalize(vmin=0, vmax=1)) 
             cbar_cool = plt.colorbar(sm_cool)
             cbar_cool.set_label('Probability of each cluster', rotation=270) """
-            for n, traj in enumerate(predictions['traj'][0]):
+            for n, traj in enumerate(predictions['traj'][0][:]):
                 """ ax[1].plot(traj[:, 0].detach().cpu().numpy(), traj[:, 1].detach().cpu().numpy(), lw=4,
                            color='r', alpha=0.8)
                 ax[1].scatter(traj[-1, 0].detach().cpu().numpy(), traj[-1, 1].detach().cpu().numpy(), 60,
