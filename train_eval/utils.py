@@ -123,19 +123,14 @@ def collate_fn_dgl_hetero(batch):
             if count != 0:
                 succ_u = np.append(succ_u,[i]*count)
                 succ_v = np.append(succ_v, np.nonzero(succ_adj_matrix[i])[0])
-        if len(succ_u) == 0:
-            # If no successors, add self loop - some sequences have no lanes!
-            succ_u = np.array([0])
-            succ_v = np.array([0])
+
         prox_u = np.array([])
         prox_v = np.array([])
         for i, count in enumerate(np.count_nonzero(prox_adj_matrix, axis=1)):
             if count != 0:
                 prox_u = np.append(prox_u,[i]*count)
                 prox_v = np.append(prox_v, np.nonzero(prox_adj_matrix[i])[0]) 
-        if len(prox_u) == 0:
-            prox_u = np.array([0])
-            prox_v = np.array([0])
+                
         lanes_graphs.append(
             dgl.heterograph({
             ('l','successor','l'): (torch.tensor(succ_u, dtype=torch.int), torch.tensor(succ_v, dtype=torch.int)),

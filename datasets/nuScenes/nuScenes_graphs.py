@@ -146,7 +146,7 @@ class NuScenesGraphs(NuScenesVector):
 
     @staticmethod
     def build_adj_mat_directional_with_types(edges, edges_type):
-        # Given edges [B, number of nodes, edges per node] create adjacency matrix [B, number of nodes, number of nodes]
+        # Given edges [number of nodes, edges per node] create adjacency matrix [B, number of nodes, number of nodes]
         edges_succ_adj = np.zeros((edges.shape[0], edges.shape[0])) 
         edges_prox_adj = np.zeros((edges.shape[0], edges.shape[0])) 
         succ_u = np.array([])
@@ -163,6 +163,10 @@ class NuScenesGraphs(NuScenesVector):
                     prox_u = np.append(prox_u, i)
                     prox_v = np.append(prox_v, j)
                     edges_prox_adj[i,int(edges[i,j])] = 1
+            if np.count_nonzero(edges_succ_adj[i]) == 0 and edges_type[i, -1] == 3:
+                succ_u = np.append(succ_u, i)
+                succ_v = np.append(succ_v, i)
+                edges_succ_adj[i,i] = 1
         return edges_succ_adj, edges_prox_adj
     
     @staticmethod
