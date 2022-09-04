@@ -306,8 +306,8 @@ class PGP_SCOUTEncoder(PredictionEncoder):
 
         # Agent-node attention
         self.query_emb = nn.Linear(args['node_enc_size'], args['node_enc_size'])
-        self.key_emb = nn.Linear(args['nbr_enc_size']*2, args['nbr_enc_size']*2)
-        self.val_emb = nn.Linear(args['nbr_enc_size']*2, args['nbr_enc_size']*2)
+        self.key_emb = nn.Linear(args['nbr_enc_size'], args['nbr_enc_size'])
+        self.val_emb = nn.Linear(args['nbr_enc_size'], args['nbr_enc_size'])
         self.a_n_att = nn.MultiheadAttention(args['node_enc_size'], num_heads=1)
         self.mix = nn.Linear(args['node_enc_size']*2, args['node_enc_size'])
 
@@ -368,28 +368,28 @@ class PGP_SCOUTEncoder(PredictionEncoder):
         _, masks_for_batching_ped = self.create_batched_input(nbr_ped_feats, nbr_ped_masks)
 
 
-        interaction_feats = torch.cat((target_agent_enc.unsqueeze(1),nbr_vehicle_enc, nbr_ped_enc), dim=1)
-        target_masks = torch.ones((target_agent_enc.shape[0], 1, 1), device=target_agent_enc.device).bool()
-        interaction_masks = torch.cat((target_masks, masks_for_batching_veh.squeeze(-1),masks_for_batching_ped.squeeze(-1)), dim=1).repeat(1,1,interaction_feats.shape[-1])
-        interaction_feats_batched = torch.masked_select(interaction_feats, interaction_masks!=0) 
-        interaction_feats_batched = interaction_feats_batched.view(-1, interaction_feats.shape[2]) # BN,32
+        # interaction_feats = torch.cat((target_agent_enc.unsqueeze(1),nbr_vehicle_enc, nbr_ped_enc), dim=1)
+        # target_masks = torch.ones((target_agent_enc.shape[0], 1, 1), device=target_agent_enc.device).bool()
+        # interaction_masks = torch.cat((target_masks, masks_for_batching_veh.squeeze(-1),masks_for_batching_ped.squeeze(-1)), dim=1).repeat(1,1,interaction_feats.shape[-1])
+        # interaction_feats_batched = torch.masked_select(interaction_feats, interaction_masks!=0) 
+        # interaction_feats_batched = interaction_feats_batched.view(-1, interaction_feats.shape[2]) # BN,32
 
-        # Use mask for batching 
-        """ 
-        sum=0
-        for i, len_nbr in enumerate(inputs['surrounding_agent_representation']['len_adj']):
-            interaction_feats = torch.cat((target_agent_enc[i].unsqueeze(0), nbr_enc[sum:sum+len_nbr-1]), dim=0) 
-            sum+=len_nbr-1 """
+        # # Use mask for batching 
+        # """ 
+        # sum=0
+        # for i, len_nbr in enumerate(inputs['surrounding_agent_representation']['len_adj']):
+        #     interaction_feats = torch.cat((target_agent_enc[i].unsqueeze(0), nbr_enc[sum:sum+len_nbr-1]), dim=0) 
+        #     sum+=len_nbr-1 """
         
-        # Agent interaction (agent||veh_nbr||ped_nbr [32,162,32]-» agent_nbr_context) ! 
-        interaction_graph = inputs['interaction_graphs'].to(target_agent_feats.device) 
-        agent_nbr_context = self.interaction_net(interaction_graph, interaction_feats_batched, None)
-        # Concatenate outputs of the different heads
-        agent_nbr_context = agent_nbr_context.view(agent_nbr_context.shape[0],-1)
+        # # Agent interaction (agent||veh_nbr||ped_nbr [32,162,32]-» agent_nbr_context) ! 
+        # interaction_graph = inputs['interaction_graphs'].to(target_agent_feats.device) 
+        # agent_nbr_context = self.interaction_net(interaction_graph, interaction_feats_batched, None)
+        # # Concatenate outputs of the different heads
+        # agent_nbr_context = agent_nbr_context.view(agent_nbr_context.shape[0],-1)
 
-        # Concatenate agents encodings and agent_nbr_context
-        interaction_feats_batched = torch.cat((interaction_feats_batched, agent_nbr_context), dim=-1) # BN,32
-        interaction_feats = self.scatter_batched_input(interaction_feats_batched, interaction_masks[:,:,-1:].unsqueeze(-1)) # B, N, 32
+        # # Concatenate agents encodings and agent_nbr_context
+        # interaction_feats_batched = torch.cat((interaction_feats_batched, agent_nbr_context), dim=-1) # BN,32
+        # interaction_feats = self.scatter_batched_input(interaction_feats_batched, interaction_masks[:,:,-1:].unsqueeze(-1)) # B, N, 32
 
         # nbr_vehicle_enc = torch.cat((nbr_vehicle_enc, agent_nbr_context[1:1+nbr_vehicle_enc.shape[0]]), dim=-1)
         # nbr_ped_enc = torch.cat((nbr_ped_enc, agent_nbr_context[1+nbr_vehicle_enc.shape[0]:]), dim=-1) 
@@ -409,19 +409,24 @@ class PGP_SCOUTEncoder(PredictionEncoder):
         lane_node_feats_batched = lane_node_feats[batch_lane_node_masks] # BN,32
         lane_node_embedding = self.leaky_relu(self.node_emb(lane_node_feats_batched)) 
         lane_node_embedding = lane_node_embedding.view(lane_node_embedding.shape[0], -1) # B,164,32
+        assert lanes_graphs.num_nodes() == lane_node_embedding.shape[0]
         lane_node_enc = self.node_encoder(lanes_graphs, lane_node_embedding) 
         lane_node_enc = self.scatter_batched_input(lane_node_enc, batch_lane_node_masks.unsqueeze(-1).unsqueeze(-1))
 
 
         # Agent-node attention (between nbrs and lanes)  
-        veh_interaction_feats = torch.cuda.FloatTensor(interaction_feats.shape[0],nbr_vehicle_feats.shape[1], interaction_feats.shape[-1])
-        ped_interaction_feats = torch.cuda.FloatTensor(interaction_feats.shape[0],nbr_ped_feats.shape[1], interaction_feats.shape[-1]) 
-        for i, batch in enumerate(interaction_feats): 
-            veh_interaction_feats[i] = interaction_feats[i,1:nbr_vehicle_feats.shape[1]+1]
-            ped_interaction_feats[i] = interaction_feats[i,-nbr_ped_feats.shape[1]:]
+        # veh_interaction_feats = torch.cuda.FloatTensor(interaction_feats.shape[0],nbr_vehicle_feats.shape[1], interaction_feats.shape[-1])
+        # ped_interaction_feats = torch.cuda.FloatTensor(interaction_feats.shape[0],nbr_ped_feats.shape[1], interaction_feats.shape[-1]) 
+        # for i, batch in enumerate(interaction_feats): 
+        #     veh_interaction_feats[i] = interaction_feats[i,1:nbr_vehicle_feats.shape[1]+1]
+        #     ped_interaction_feats[i] = interaction_feats[i,-nbr_ped_feats.shape[1]:]
+        # queries = self.query_emb(lane_node_enc).permute(1, 0, 2)
+        # keys = self.key_emb(torch.cat((veh_interaction_feats, ped_interaction_feats), dim=1)).permute(1, 0, 2)
+        # vals = self.val_emb(torch.cat((veh_interaction_feats, ped_interaction_feats), dim=1)).permute(1, 0, 2)
+        nbr_encodings = torch.cat((nbr_vehicle_enc, nbr_ped_enc), dim=1)
         queries = self.query_emb(lane_node_enc).permute(1, 0, 2)
-        keys = self.key_emb(torch.cat((veh_interaction_feats, ped_interaction_feats), dim=1)).permute(1, 0, 2)
-        vals = self.val_emb(torch.cat((veh_interaction_feats, ped_interaction_feats), dim=1)).permute(1, 0, 2)
+        keys = self.key_emb(nbr_encodings).permute(1, 0, 2)
+        vals = self.val_emb(nbr_encodings).permute(1, 0, 2)
         attn_masks = torch.cat((inputs['agent_node_masks']['vehicles'],
                                 inputs['agent_node_masks']['pedestrians']), dim=2)
         att_op, _ = self.a_n_att(queries, keys, vals, attn_mask=attn_masks)
