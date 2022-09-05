@@ -117,6 +117,8 @@ class PGPEncoder(PredictionEncoder):
         # Mask out nbr_vehicle_masks by agent 20% of the time - 1 means mask out
         mask_out = torch.bernoulli(torch.ones((nbr_vehicle_masks.shape[:2])) * self.agent_mask_prob_v).unsqueeze(-1).repeat(1,1,nbr_vehicle_masks.shape[-2]).unsqueeze(-1).repeat(1,1,1,nbr_vehicle_masks.shape[-1]).to(nbr_vehicle_masks.device)
         nbr_vehicle_masks =  ~nbr_vehicle_masks.bool() & ~mask_out.bool()
+        # Update agent_node_masks with mask_out
+        inputs['agent_node_masks']['vehicles'] = inputs['agent_node_masks']['vehicles'].int() | mask_out[:,:,0,0].unsqueeze(1).repeat(1,164,1).int()
         nbr_vehicle_embedding = self.leaky_relu(self.nbr_emb(nbr_vehicle_feats))
         nbr_vehicle_enc = self.variable_size_gru_encode(nbr_vehicle_embedding, nbr_vehicle_masks, self.nbr_enc) #B,84,32
         nbr_ped_feats = inputs['surrounding_agent_representation']['pedestrians']
@@ -125,6 +127,7 @@ class PGPEncoder(PredictionEncoder):
         # Mask out nbr_vehicle_masks by agent 20% of the time 
         mask_out = torch.bernoulli(torch.ones((nbr_ped_masks.shape[:2])) * self.agent_mask_prob_v).unsqueeze(-1).repeat(1,1,nbr_ped_masks.shape[-2]).unsqueeze(-1).repeat(1,1,1,nbr_ped_masks.shape[-1]).to(nbr_ped_masks.device)
         nbr_ped_masks =  ~nbr_ped_masks.bool() & ~mask_out.bool()
+        inputs['agent_node_masks']['pedestrians'] = inputs['agent_node_masks']['pedestrians'].int() | mask_out[:,:,0,0].unsqueeze(1).repeat(1,164,1).int()
         nbr_ped_embedding = self.leaky_relu(self.nbr_emb(nbr_ped_feats))
         nbr_ped_enc = self.variable_size_gru_encode(nbr_ped_embedding, nbr_ped_masks, self.nbr_enc)
 
@@ -133,8 +136,8 @@ class PGPEncoder(PredictionEncoder):
         queries = self.query_emb(lane_node_enc).permute(1, 0, 2)
         keys = self.key_emb(nbr_encodings).permute(1, 0, 2)
         vals = self.val_emb(nbr_encodings).permute(1, 0, 2)
-        attn_masks = torch.cat((inputs['agent_node_masks']['vehicles'],
-                                inputs['agent_node_masks']['pedestrians']), dim=2)
+        attn_masks = torch.cat((inputs['agent_node_masks']['vehicles'].float(),
+                                inputs['agent_node_masks']['pedestrians'].float()), dim=2)
         att_op, _ = self.a_n_att(queries, keys, vals, attn_mask=attn_masks)
         att_op = att_op.permute(1, 0, 2)
 
