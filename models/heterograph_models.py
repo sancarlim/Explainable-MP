@@ -20,14 +20,15 @@ class HGT(nn.Module):
             self.gcs.append(HGTLayer(n_hid, n_hid, node_dict, edge_dict, n_heads[i], use_norm = use_norm))
         self.out = nn.Linear(n_hid, n_out)
 
-    def forward(self, G, input):
+    def forward(self, G, out_key):
         h = {}
         for ntype in G.ntypes:
             n_id = self.node_dict[ntype]
-            h[ntype] = F.gelu(self.adapt_ws[n_id](input))
+            h[ntype] = F.gelu(self.adapt_ws[n_id](G.nodes[ntype].data['inp']))
         for i in range(self.n_layers):
             h = self.gcs[i](G, h)
-        return self.out(h[ntype])
+        return self.out(h[out_key])
+
 
 class HeteroRGCN(nn.Module):
     def __init__(self, G, in_size, hidden_size, out_size):

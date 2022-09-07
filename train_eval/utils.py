@@ -1,3 +1,4 @@
+from sklearn.metrics import v_measure_score
 import torch.optim
 from typing import Dict, Union
 import torch
@@ -111,36 +112,43 @@ def collate_fn_dgl_hetero(batch):
         # Interaction graph
         adj = element['inputs']['surrounding_agent_representation']['adj_matrix'] 
         len_adj = element['inputs']['surrounding_agent_representation']['len_adj']  
-        adj_matrix = adj[:len_adj, :len_adj]
-        interaction_graphs.append(dgl.from_scipy(spp.coo_matrix(adj_matrix)).int())
+        lane_veh_adj_matrix = element['inputs']['agent_node_masks']['vehicles'].transpose(1,0) # 84 x 164 
+        lane_ped_adj_matrix = element['inputs']['agent_node_masks']['pedestrians'].transpose(1,0) # 84 x 164
+        lane_veh_u, lane_veh_v = np.where(lane_veh_adj_matrix==0)
+        lane_ped_u, lane_ped_v = np.where(lane_ped_adj_matrix==0)
+        veh_mask=element['inputs']['surrounding_agent_representation']['vehicle_masks']
+        ped_mask=element['inputs']['surrounding_agent_representation']['pedestrian_masks']
+        num_v = np.where(veh_mask[:,:,0]==0)[0].max()+1 if len(np.where(veh_mask[:,:,0]==0)[0])>0 else 0
+        num_p = np.where(ped_mask[:,:,0]==0)[0].max()+1 if len(np.where(ped_mask[:,:,0]==0)[0])>0 else 0
+        adj_matrix_v = adj[1:num_v+1, 1:num_v+1] # +1 to account for focal agent which we exclude
+        adj_matrix_p = adj[1:num_p+1, 1:num_p+1]
+        veh_u, veh_v = np.nonzero(adj_matrix_v)
+        ped_u, ped_v = np.nonzero(adj_matrix_p)
+        veh_ped_u, veh_ped_v = np.where(adj[1:num_v, num_v+1:] == 1) 
+        # interaction_graphs.append(dgl.from_scipy(spp.coo_matrix(adj_matrix)).int())
         # Lane graph
         succ_adj_matrix = element['inputs']['map_representation']['succ_adj_matrix'] 
         prox_adj_matrix = element['inputs']['map_representation']['prox_adj_matrix']
-        # TODO: Do it in preprocess, save succ_u, succ_v, prox_u, prox_v in data. For batching they need to have the same length.
-        succ_u = np.array([])
-        succ_v = np.array([])
-        for i, count in enumerate(np.count_nonzero(succ_adj_matrix, axis=1)):
-            if count != 0:
-                succ_u = np.append(succ_u,[i]*count)
-                succ_v = np.append(succ_v, np.nonzero(succ_adj_matrix[i])[0])
-
-        prox_u = np.array([])
-        prox_v = np.array([])
-        for i, count in enumerate(np.count_nonzero(prox_adj_matrix, axis=1)):
-            if count != 0:
-                prox_u = np.append(prox_u,[i]*count)
-                prox_v = np.append(prox_v, np.nonzero(prox_adj_matrix[i])[0]) 
-                
+        
+        succ_u, succ_v = np.nonzero(succ_adj_matrix)[0], np.nonzero(succ_adj_matrix)[1] 
+        prox_u, prox_v = np.nonzero(prox_adj_matrix)  
         lanes_graphs.append(
             dgl.heterograph({
             ('l','successor','l'): (torch.tensor(succ_u, dtype=torch.int), torch.tensor(succ_v, dtype=torch.int)),
-            ('l','proximal','l'):  (torch.tensor(prox_u, dtype=torch.int), torch.tensor(prox_v, dtype=torch.int))
+            ('l','proximal','l'):  (torch.tensor(prox_u, dtype=torch.int), torch.tensor(prox_v, dtype=torch.int)),
+            ('v', 'v_close_l','l'): (torch.tensor(lane_veh_u, dtype=torch.int), torch.tensor(lane_veh_v, dtype=torch.int)),
+            ('p', 'p_close_l','l'): (torch.tensor(lane_ped_u, dtype=torch.int), torch.tensor(lane_ped_v, dtype=torch.int)),
+            ('v', 'v_interact_v','v'): (torch.tensor(veh_u, dtype=torch.int), torch.tensor(veh_v, dtype=torch.int)),  
+            ('v', 'v_interact_p','p'): (torch.tensor(veh_ped_u, dtype=torch.int), torch.tensor(veh_ped_v, dtype=torch.int)),
+            ('p', 'p_interact_p','p'): (torch.tensor(ped_u, dtype=torch.int), torch.tensor(ped_v, dtype=torch.int)),
         }) )
         
-    interaction_batched_graph = dgl.batch(interaction_graphs)
+    #interaction_batched_graph = dgl.batch(interaction_graphs)
     lanes_batched_graph = dgl.batch(lanes_graphs) 
+    if lanes_batched_graph['p_interact_p'].num_nodes() == 0:
+        print('no pedestrians')
 
     data = default_collate(batch)
-    data['inputs']['interaction_graphs'] = interaction_batched_graph
+    #data['inputs']['interaction_graphs'] = interaction_batched_graph
     data['inputs']['lanes_graphs'] = lanes_batched_graph
     return data

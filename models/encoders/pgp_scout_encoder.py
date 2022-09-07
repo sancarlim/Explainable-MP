@@ -283,7 +283,7 @@ class PGP_SCOUTEncoder(PredictionEncoder):
         # Node encoders
         self.node_emb = nn.Linear(args['node_feat_size']+1, args['node_emb_size'])
         # PGP encoder
-        #self.node_encoder = nn.GRU(args['node_emb_size'], args['node_enc_size'], batch_first=True)
+        self.node_gru_encoder = nn.GRU(args['node_emb_size'], args['node_enc_size'], batch_first=True)
 
         if not args['heterograph']:
             # Lane GAT (homograph)
@@ -292,7 +292,7 @@ class PGP_SCOUTEncoder(PredictionEncoder):
                                             residual=True, negative_slope=0.2) 
         else:
             # HeteroGraph Transformer
-            self.node_encoder = HGT({'l':0}, {'proximal':0, 'successor':1}, args['node_emb_size']*20, args['node_enc_size'], 
+            self.hgt_encoder = HGT({'l':0, 'p':1, 'v':2}, {'proximal':0, 'successor':1, 'v_close_l':2,'p_close_l':3,'v_interact_v':4,'v_interact_p':5,'p_interact_p':6}, args['node_enc_size'], args['node_enc_size'], 
                                     args['node_enc_size'], args['num_layers'], args['num_heads_lanes'], use_norm=True)
 
         # Surrounding agent encoder
@@ -358,14 +358,14 @@ class PGP_SCOUTEncoder(PredictionEncoder):
         nbr_vehicle_feats = torch.cat((nbr_vehicle_feats, torch.zeros_like(nbr_vehicle_feats[:, :, :, 0:1])), dim=-1)
         nbr_vehicle_masks = inputs['surrounding_agent_representation']['vehicle_masks']
         nbr_vehicle_embedding = self.leaky_relu(self.nbr_emb(nbr_vehicle_feats))
-        nbr_vehicle_enc = self.variable_size_gru_encode(nbr_vehicle_embedding, nbr_vehicle_masks, self.nbr_enc) #B,84,32
+        nbr_vehicle_enc = self.variable_size_gru_encode(nbr_vehicle_embedding, nbr_vehicle_masks, self.nbr_enc, batched=True) #B,84,32
         _, masks_for_batching_veh = self.create_batched_input(nbr_vehicle_feats, nbr_vehicle_masks)
         nbr_ped_feats = inputs['surrounding_agent_representation']['pedestrians']
         nbr_ped_feats = torch.cat((nbr_ped_feats, torch.ones_like(nbr_ped_feats[:, :, :, 0:1])), dim=-1)
         nbr_ped_masks = inputs['surrounding_agent_representation']['pedestrian_masks']
         nbr_ped_embedding = self.leaky_relu(self.nbr_emb(nbr_ped_feats))
-        nbr_ped_enc = self.variable_size_gru_encode(nbr_ped_embedding, nbr_ped_masks, self.nbr_enc)
-        _, masks_for_batching_ped = self.create_batched_input(nbr_ped_feats, nbr_ped_masks)
+        nbr_ped_enc = self.variable_size_gru_encode(nbr_ped_embedding, nbr_ped_masks, self.nbr_enc, batched=True) 
+        _, masks_for_batching_ped = self.create_batched_input(nbr_ped_feats, nbr_ped_masks) 
 
 
         # interaction_feats = torch.cat((target_agent_enc.unsqueeze(1),nbr_vehicle_enc, nbr_ped_enc), dim=1)
@@ -407,10 +407,13 @@ class PGP_SCOUTEncoder(PredictionEncoder):
         lane_node_feats = torch.cat((lane_node_feats, lane_node_masks[:,:,:,:1]), dim=-1)
         batch_lane_node_masks = (~(lane_node_masks[:,:,:,0]!=0)).any(-1)
         lane_node_feats_batched = lane_node_feats[batch_lane_node_masks] # BN,32
-        lane_node_embedding = self.leaky_relu(self.node_emb(lane_node_feats_batched)) 
-        lane_node_embedding = lane_node_embedding.view(lane_node_embedding.shape[0], -1) # B,164,32
-        assert lanes_graphs.num_nodes() == lane_node_embedding.shape[0]
-        lane_node_enc = self.node_encoder(lanes_graphs, lane_node_embedding) 
+        lane_node_embedding = self.leaky_relu(self.node_emb(lane_node_feats)) 
+        lane_node_enc = self.variable_size_gru_encode(lane_node_embedding, lane_node_masks, self.node_gru_encoder, batched=True)
+        #lane_node_embedding = lane_node_embedding.view(lane_node_embedding.shape[0], -1) # B,164,32 
+        lanes_graphs.nodes['l'].data['inp'] = lane_node_enc
+        lanes_graphs.nodes['p'].data['inp'] = nbr_ped_enc
+        lanes_graphs.nodes['v'].data['inp'] = nbr_vehicle_enc
+        lane_node_enc = self.hgt_encoder(lanes_graphs, out_key='l') 
         lane_node_enc = self.scatter_batched_input(lane_node_enc, batch_lane_node_masks.unsqueeze(-1).unsqueeze(-1))
 
 
@@ -423,24 +426,24 @@ class PGP_SCOUTEncoder(PredictionEncoder):
         # queries = self.query_emb(lane_node_enc).permute(1, 0, 2)
         # keys = self.key_emb(torch.cat((veh_interaction_feats, ped_interaction_feats), dim=1)).permute(1, 0, 2)
         # vals = self.val_emb(torch.cat((veh_interaction_feats, ped_interaction_feats), dim=1)).permute(1, 0, 2)
-        nbr_encodings = torch.cat((nbr_vehicle_enc, nbr_ped_enc), dim=1)
+        """ nbr_encodings = torch.cat((nbr_vehicle_enc, nbr_ped_enc), dim=1)
         queries = self.query_emb(lane_node_enc).permute(1, 0, 2)
         keys = self.key_emb(nbr_encodings).permute(1, 0, 2)
         vals = self.val_emb(nbr_encodings).permute(1, 0, 2)
         attn_masks = torch.cat((inputs['agent_node_masks']['vehicles'],
                                 inputs['agent_node_masks']['pedestrians']), dim=2)
         att_op, _ = self.a_n_att(queries, keys, vals, attn_mask=attn_masks)
-        att_op = att_op.permute(1, 0, 2)
+        att_op = att_op.permute(1, 0, 2) 
 
         # Concatenate with original node encodings and 1x1 conv 
         lane_node_enc = self.leaky_relu(self.mix(torch.cat((lane_node_enc, att_op), dim=2)))
-
+        
         # GAT layers
         # Build adj matrix - treat succ and prox edges as equivalent and bidirectional
         adj_mat = self.build_adj_mat(inputs['map_representation']['s_next'], inputs['map_representation']['edge_type'])
         for gat_layer in self.gat:
             lane_node_enc += gat_layer(lane_node_enc, adj_mat) 
-
+        """
         # Lane node masks
         lane_node_masks = ~lane_node_masks[:, :, :, 0].bool()
         lane_node_masks = lane_node_masks.any(dim=2)
@@ -486,7 +489,7 @@ class PGP_SCOUTEncoder(PredictionEncoder):
         return input_batched, masks_for_batching
 
     @staticmethod
-    def variable_size_gru_encode(feat_embedding: torch.Tensor, masks: torch.Tensor, gru: nn.GRU) -> torch.Tensor:
+    def variable_size_gru_encode(feat_embedding: torch.Tensor, masks: torch.Tensor, gru: nn.GRU, batched: bool = False) -> torch.Tensor:
         """
         Returns GRU encoding for a batch of inputs where each sample in the batch is a set of a variable number
         of sequences, of variable lengths.
@@ -508,6 +511,8 @@ class PGP_SCOUTEncoder(PredictionEncoder):
             # Encode
             _, encoding_batched = gru(feat_embedding_packed)
             encoding_batched = encoding_batched.squeeze(0)
+            if batched:
+                return encoding_batched
 
             # Scatter back to appropriate batch index
             masks_for_scattering = masks_for_batching.squeeze(3).repeat(1, 1, encoding_batched.shape[-1])
@@ -515,6 +520,9 @@ class PGP_SCOUTEncoder(PredictionEncoder):
             encoding = encoding.masked_scatter(masks_for_scattering, encoding_batched)
 
         else:
+            if batched:
+                # return empty tensor
+                return torch.zeros((0,gru.hidden_size), device=device)
             batch_size = feat_embedding.shape[0]
             max_num = feat_embedding.shape[1]
             hidden_state_size = gru.hidden_size
