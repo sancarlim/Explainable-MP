@@ -1,6 +1,8 @@
+from cProfile import label
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 from typing import Dict, List
 from train_eval.initialization import initialize_prediction_model, initialize_dataset, get_specific_args
 from nuscenes.eval.prediction.splits import get_prediction_challenge_split
@@ -30,7 +32,7 @@ ego_car = plt.imread('/media/14TBDISK/sandra//DBU_Graph/NuScenes/icons/Car TOP_V
 agent = plt.imread('/media/14TBDISK/sandra/DBU_Graph/NuScenes/icons/Car TOP_VIEW 375397.png')
 cars = plt.imread('/media/14TBDISK/sandra/DBU_Graph/NuScenes/icons/Car TOP_VIEW 80CBE5.png') 
 
-layers = ['drivable_area', 
+layers = [#'drivable_area', 
           'lane',
           'road_segment',
           'road_block',
@@ -106,7 +108,7 @@ class Visualizer:
         if not os.path.isdir(os.path.join(output_dir, 'results', 'gifs')):
             os.mkdir(os.path.join(output_dir, 'results', 'gifs'))
         start = time.time()
-        for n, indices in enumerate(index_list[5:6]):
+        for n, indices in enumerate(index_list[-1:]):
             imgs, fancy_img, graph_img, scene = self.generate_nuscenes_gif(indices)
             filename = os.path.join(output_dir, 'example' + str(n) + scene  + '_fancy.gif')
             imageio.mimsave(filename, fancy_img, format='GIF', fps=2)  
@@ -257,7 +259,7 @@ class Visualizer:
             cbar_cool.set_label('Probability of each mode', rotation=270)
                                         
             r_img = rotate(ego_car, quaternion_yaw(Quaternion(pose_record['rotation']))*180/math.pi,reshape=True)
-            oi = OffsetImage(r_img, zoom=0.01, zorder=500)
+            oi = OffsetImage(r_img, zoom=0.011, zorder=500)
             veh_box = AnnotationBbox(oi, (ego_poses[0], ego_poses[1]), frameon=False)
             veh_box.zorder = 500
             ax2.add_artist(veh_box)
@@ -308,25 +310,24 @@ class Visualizer:
                     feature = data['inputs']['surrounding_agent_representation']['vehicles'][:,4,:,:]
                     feature[:,:,:2] = torch.tensor(convert_global_coords_to_local(history, annotations[36]['translation'], annotations[36]['rotation']), device=device)
                     data['inputs']['surrounding_agent_representation']['vehicles'][:,4,:,:] = feature
-                ax2.plot(history[:, 0], history[:, 1], 'k--')
+                ax2.plot(history[:, 0], history[:, 1], 'k--' )
 
                 #Plot future
                 if len(future[ann['instance_token']]) > 0:
-                    ax2.plot(future[ann['instance_token']][:, 0], 
-                            future[ann['instance_token']][:, 1], 
-                            'w--')
+                    future_plot = future[ann['instance_token']]  
+                    ax2.plot(future_plot[:,0], future_plot[:,1], 'w--' )  
                     
                 # Current Node Position
-                node_circle_size=0.3
+                node_circle_size=0.4
                 circle_edge_width=0.5
                 if ann['instance_token'] == i_t:
                     agent_translation = ann['translation']
                     agent_rotation = ann['rotation']
                     r_img = rotate(agent, quaternion_yaw(Quaternion(ann['rotation']))*180/math.pi,reshape=True)
-                    oi = OffsetImage(r_img, zoom=0.01, zorder=500)
+                    oi = OffsetImage(r_img, zoom=0.011, zorder=500 )
                     veh_box = AnnotationBbox(oi, (history[-1, 0], history[-1, 1]), frameon=False)
                     veh_box.zorder = 800
-                    ax2.add_artist(veh_box)                     
+                    ax2.add_artist(veh_box)                  
                 elif ann['category_name'].split('.')[1] == 'motorcycle' or ann['category_name'].split('.')[1] == 'bicycle':
                     circle = plt.Circle((history[-1, 0],
                                 history[-1, 1]),
@@ -338,7 +339,7 @@ class Visualizer:
                     ax2.add_artist(circle)
                 elif ann['category_name'].split('.')[0] == 'vehicle': 
                     r_img = rotate(cars, quaternion_yaw(Quaternion(ann['rotation']))*180/math.pi,reshape=True)
-                    oi = OffsetImage(r_img, zoom=0.01, zorder=5)
+                    oi = OffsetImage(r_img, zoom=0.011, zorder=5)
                     veh_box = AnnotationBbox(oi, (history[-1, 0], history[-1, 1]), frameon=False)
                     veh_box.zorder = 5
                     ax2.add_artist(veh_box)                 
@@ -441,12 +442,39 @@ class Visualizer:
                 ax[1].scatter(traj[-1, 0].detach().cpu().numpy(), traj[-1, 1].detach().cpu().numpy(), 60,
                               color='r', alpha=0.8) """
                 global_traj = convert_local_coords_to_global(traj.detach().cpu().numpy(), agent_translation, agent_rotation)
-                ax2.plot(global_traj[:, 0], global_traj[:, 1], color=cmap_cool(4*predictions['probs'][0][n].detach().cpu().numpy()), lw=max(1,7*predictions['probs'][0][n]), linestyle = '--', alpha=0.8) 
+                if n == 0:
+                    ax2.plot(global_traj[:, 0], global_traj[:, 1], color=cmap_cool(4*predictions['probs'][0][n].detach().cpu().numpy()), 
+                                    lw=max(1,7*predictions['probs'][0][n]), linestyle = '--', alpha=0.8,label='Predicted Trajectory')
+                else: 
+                    ax2.plot(global_traj[:, 0], global_traj[:, 1], color=cmap_cool(4*predictions['probs'][0][n].detach().cpu().numpy()), 
+                                    lw=max(1,7*predictions['probs'][0][n]), linestyle = '--', alpha=0.8) 
                 """self.visualize_graph(fig3,ax3,data['inputs']['map_representation']['lane_node_feats'][0].detach().cpu().numpy(), 
                                     data['inputs']['map_representation']['s_next'][0].detach().cpu().numpy(), data['inputs']['map_representation']['edge_type'][0].detach().cpu().numpy(),
                                     data['ground_truth']['evf_gt'][0].detach().cpu().numpy(), data['inputs']['node_seq_gt'][0].detach().cpu().numpy(), traj.detach().cpu().numpy(), 
                                     predictions['pi'][0].detach().cpu().numpy(), cmap_cool) """
             
+            legend=ax2.legend(frameon=True, loc='upper right', facecolor='lightsteelblue', edgecolor='black', fontsize=9)
+            handles, labels = ax2.get_legend_handles_labels() 
+            idx = labels.index("lane")
+            handles.pop(idx)
+            labels.pop(idx)
+            idx=labels.index("road_block")
+            handles.pop(idx)
+            labels.pop(idx)
+            labels.append("2s past trajectory")
+            handles.append(ax2.plot(history[:, 0], history[:, 1], 'k--' )[0]) 
+            labels.append("6s future ground truth trajectory")
+            handles.append(ax2.plot(future_plot[:, 0], future_plot[:, 1], 'w--' )[0]) 
+            handles.append(Patch(facecolor='red', edgecolor='r'))
+            labels.append("Autonomous Vehicle")
+            handles.append(Patch(facecolor='darkblue', edgecolor='b'))
+            labels.append("Focal vehicle")
+            handles.append(Patch(facecolor='lightblue', edgecolor='c')) 
+            labels.append("Surrounding agents")
+            legend._legend_box = None
+            legend._init_legend_box(handles, labels)
+            legend._set_loc(legend._loc)
+            legend.set_title(legend.get_title().get_text())
             
             
             """traj_gt = data['ground_truth']['traj'][0]
