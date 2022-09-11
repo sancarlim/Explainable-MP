@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence
 from typing import Dict
-
+import numpy as np
 
 # Initialize device:
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -113,7 +113,19 @@ class PGPEncoder(PredictionEncoder):
         # Encode surrounding agents
         nbr_vehicle_feats = inputs['surrounding_agent_representation']['vehicles']
         nbr_vehicle_feats = torch.cat((nbr_vehicle_feats, torch.zeros_like(nbr_vehicle_feats[:, :, :, 0:1])), dim=-1)
-        nbr_vehicle_masks = inputs['surrounding_agent_representation']['vehicle_masks']
+        nbr_vehicle_masks = inputs['surrounding_agent_representation']['vehicle_masks'] 
+        
+
+        ###### Mask out only some frames of vehicles that are in the radius of 20m from agent
+        target_adj_matrix = inputs['surrounding_agent_representation']['adj_matrix'][:,0,1:nbr_vehicle_feats.shape[1]+1] 
+        target_adj_matrix = target_adj_matrix.unsqueeze(-1).repeat(1,1,nbr_vehicle_feats.shape[2])         
+        # Mask out frames of nearby agents with a 60% probability
+        target_adj_matrix *= torch.bernoulli(target_adj_matrix * 0.8) #torch.randn(target_adj_matrix.shape,device=device ) < 0.6  
+        nbr_vehicle_masks = nbr_vehicle_masks + target_adj_matrix.unsqueeze(-1).repeat(1,1,1,nbr_vehicle_masks.shape[-1])  
+        inputs['agent_node_masks']['vehicles'] = inputs['agent_node_masks']['vehicles'].int() | nbr_vehicle_masks[:,:,:,0].any(-1).int().unsqueeze(1).repeat(1,164,1).int()
+        ##############
+
+
         # Mask out nbr_vehicle_masks by agent 20% of the time - 1 means mask out
         mask_out = torch.bernoulli(torch.ones((nbr_vehicle_masks.shape[:2])) * self.agent_mask_prob_v).unsqueeze(-1).repeat(1,1,nbr_vehicle_masks.shape[-2]).unsqueeze(-1).repeat(1,1,1,nbr_vehicle_masks.shape[-1]).to(nbr_vehicle_masks.device)
         nbr_vehicle_masks =  ~nbr_vehicle_masks.bool() & ~mask_out.bool()
