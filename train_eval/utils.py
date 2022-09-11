@@ -121,10 +121,14 @@ def collate_fn_dgl_hetero(batch):
         num_v = np.where(veh_mask[:,:,0]==0)[0].max()+1 if len(np.where(veh_mask[:,:,0]==0)[0])>0 else 0
         num_p = np.where(ped_mask[:,:,0]==0)[0].max()+1 if len(np.where(ped_mask[:,:,0]==0)[0])>0 else 0
         adj_matrix_v = adj[1:num_v+1, 1:num_v+1] # +1 to account for focal agent which we exclude
-        adj_matrix_p = adj[1:num_p+1, 1:num_p+1]
+        adj_matrix_p = adj[num_v+1:num_v+1+num_p, num_v+1:num_v+1+num_p]
         veh_u, veh_v = np.nonzero(adj_matrix_v)
         ped_u, ped_v = np.nonzero(adj_matrix_p)
-        veh_ped_u, veh_ped_v = np.where(adj[1:num_v, num_v+1:] == 1) 
+        veh_ped_u, veh_ped_v = np.where(adj[1:num_v+1, num_v+1:] == 1)  
+        # mask those pedestrians that don't appear in the interaction graph v2p
+        max_p_in_graph = veh_ped_v.max()+1 if len(veh_ped_v)>0 else 0
+        ped_mask[max_p_in_graph:,:, :] = 1
+        element['inputs']['surrounding_agent_representation']['pedestrian_masks'] =  ped_mask 
         # interaction_graphs.append(dgl.from_scipy(spp.coo_matrix(adj_matrix)).int())
         # Lane graph
         succ_adj_matrix = element['inputs']['map_representation']['succ_adj_matrix'] 
@@ -137,16 +141,14 @@ def collate_fn_dgl_hetero(batch):
             ('l','successor','l'): (torch.tensor(succ_u, dtype=torch.int), torch.tensor(succ_v, dtype=torch.int)),
             ('l','proximal','l'):  (torch.tensor(prox_u, dtype=torch.int), torch.tensor(prox_v, dtype=torch.int)),
             ('v', 'v_close_l','l'): (torch.tensor(lane_veh_u, dtype=torch.int), torch.tensor(lane_veh_v, dtype=torch.int)),
-            ('p', 'p_close_l','l'): (torch.tensor(lane_ped_u, dtype=torch.int), torch.tensor(lane_ped_v, dtype=torch.int)),
             ('v', 'v_interact_v','v'): (torch.tensor(veh_u, dtype=torch.int), torch.tensor(veh_v, dtype=torch.int)),  
-            ('v', 'v_interact_p','p'): (torch.tensor(veh_ped_u, dtype=torch.int), torch.tensor(veh_ped_v, dtype=torch.int)),
-            ('p', 'p_interact_p','p'): (torch.tensor(ped_u, dtype=torch.int), torch.tensor(ped_v, dtype=torch.int)),
+            ('v', 'v_interact_p','p'): (torch.tensor(veh_ped_u, dtype=torch.int), torch.tensor(veh_ped_v, dtype=torch.int)),  
         }) )
+        if len(ped_mask)-len(np.nonzero(ped_mask[:,0,0])[0]) != lanes_graphs[-1].num_nodes('p'):
+            print('stop')
         
     #interaction_batched_graph = dgl.batch(interaction_graphs)
     lanes_batched_graph = dgl.batch(lanes_graphs) 
-    if lanes_batched_graph['p_interact_p'].num_nodes() == 0:
-        print('no pedestrians')
 
     data = default_collate(batch)
     #data['inputs']['interaction_graphs'] = interaction_batched_graph

@@ -280,6 +280,10 @@ class PGP_SCOUTEncoder(PredictionEncoder):
         self.target_agent_emb = nn.Linear(args['target_agent_feat_size'], args['target_agent_emb_size'])
         self.target_agent_enc = nn.GRU(args['target_agent_emb_size'], args['target_agent_enc_size'], batch_first=True)
 
+        # Surrounding agent encoder
+        self.nbr_emb = nn.Linear(args['nbr_feat_size'] + 1, args['nbr_emb_size'])
+        self.nbr_enc = nn.GRU(args['nbr_emb_size'], args['nbr_enc_size'], batch_first=True)
+
         # Node encoders
         self.node_emb = nn.Linear(args['node_feat_size']+1, args['node_emb_size'])
         # PGP encoder
@@ -292,15 +296,12 @@ class PGP_SCOUTEncoder(PredictionEncoder):
                                             residual=True, negative_slope=0.2) 
         else:
             # HeteroGraph Transformer
-            self.hgt_encoder = HGT({'l':0, 'p':1, 'v':2}, {'proximal':0, 'successor':1, 'v_close_l':2,'p_close_l':3,'v_interact_v':4,'v_interact_p':5,'p_interact_p':6}, args['node_enc_size'], args['node_enc_size'], 
+            self.hgt_encoder = HGT({'l':0, 'p':1, 'v':2}, {'proximal':0, 'successor':1, 'v_close_l':2,'v_interact_v':3,'v_interact_p':4 }, args['node_enc_size'], args['node_enc_size'], 
                                     args['node_enc_size'], args['num_layers'], args['num_heads_lanes'], use_norm=True)
 
-        # Surrounding agent encoder
-        self.nbr_emb = nn.Linear(args['nbr_feat_size'] + 1, args['nbr_emb_size'])
-        self.nbr_enc = nn.GRU(args['nbr_emb_size'], args['nbr_enc_size'], batch_first=True)
         
         # Agent interaction (agent||veh_nbr||ped_nbr -» agent_nbr_context) ! 
-        self.interaction_net = GATv2Conv(args['nbr_enc_size'], args['nbr_enc_size'], 
+        """ self.interaction_net = GATv2Conv(args['nbr_enc_size'], args['nbr_enc_size'], 
                                          num_heads=args['num_heads_agents'], feat_drop=0., attn_drop=0., share_weights=True,
                                          residual=True, activation=F.elu, allow_zero_in_degree=True)  
 
@@ -311,12 +312,14 @@ class PGP_SCOUTEncoder(PredictionEncoder):
         self.a_n_att = nn.MultiheadAttention(args['node_enc_size'], num_heads=1)
         self.mix = nn.Linear(args['node_enc_size']*2, args['node_enc_size'])
 
-        # Non-linearities
-        self.leaky_relu = nn.LeakyReLU()
 
         # GAT layers
         self.gat = nn.ModuleList([GAT(args['node_enc_size'], args['node_enc_size'])
-                                  for _ in range(args['num_heads'])])
+                                  for _ in range(args['num_heads'])]) """
+        
+
+        # Non-linearities
+        self.leaky_relu = nn.LeakyReLU()
 
     def forward(self, inputs: Dict) -> Dict:
         """
