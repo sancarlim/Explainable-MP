@@ -9,7 +9,7 @@ import numpy as np
 from nuscenes.prediction.helper import convert_local_coords_to_global
 from nuscenes.eval.prediction.data_classes import Prediction
 import json
-from train_eval.utils import collate_fn_dgl
+from train_eval.utils import collate_fn_dgl_hetero
 
 
 # Initialize device:
@@ -35,8 +35,8 @@ class Evaluator:
         test_set = initialize_dataset(ds_type, ['load_data', data_dir, cfg['test_set_args']] + spec_args)
 
         # Initialize dataloader
-        if cfg['encoder_type'] == 'scout_encoder':
-            collate_fn = collate_fn_dgl
+        if 'scout' in cfg['encoder_type']:
+            collate_fn = collate_fn_dgl_hetero
         else:
             collate_fn = None
         self.dl = torch_data.DataLoader(test_set, cfg['batch_size'], shuffle=False, num_workers=cfg['num_workers'], collate_fn=collate_fn)

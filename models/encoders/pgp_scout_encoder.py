@@ -5,7 +5,7 @@ import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence
 from typing import Dict, List
 from torch import Tensor
-from models.heterograph_models import HGT
+from models.heterograph_models import HGT, ieHGCN 
 import torch.nn.functional as F 
 from dgl import DGLError
 from dgl.nn import GATv2Conv 
@@ -296,8 +296,10 @@ class PGP_SCOUTEncoder(PredictionEncoder):
                                             residual=True, negative_slope=0.2) 
         else:
             # HeteroGraph Transformer
-            self.hgt_encoder = HGT({'l':0, 'p':1, 'v':2}, {'proximal':0, 'successor':1, 'v_close_l':2,'v_interact_v':3,'v_interact_p':4 }, args['node_enc_size'], args['node_enc_size'], 
-                                    args['node_enc_size'], args['num_layers'], args['num_heads_lanes'], use_norm=True)
+            self.hgt_encoder = HGT({'l':0, 'p':1, 'v':2}, {'proximal':0, 'successor':1, 'v_close_l':2,'v_interact_v':3,'v_interact_p':4 }, args['node_enc_size'], args['node_hgt_size'], 
+                                    args['node_out_hgt_size'], args['num_layers'], args['num_heads_lanes'], use_norm=True)
+            
+            self.hgt_encoder = ieHGCN(args['num_layers'], args['node_enc_size'], args['node_hgt_size'], args['node_out_hgt_size'], attn_dim=args['node_hgt_size'], ntypes={'l':0, 'p':1, 'v':2},etypes={'proximal':0, 'successor':1, 'v_close_l':2,'v_interact_v':3,'v_interact_p':4 })
 
         
         # Agent interaction (agent||veh_nbr||ped_nbr -» agent_nbr_context) ! 
@@ -413,10 +415,13 @@ class PGP_SCOUTEncoder(PredictionEncoder):
         lane_node_embedding = self.leaky_relu(self.node_emb(lane_node_feats)) 
         lane_node_enc = self.variable_size_gru_encode(lane_node_embedding, lane_node_masks, self.node_gru_encoder, batched=True)
         #lane_node_embedding = lane_node_embedding.view(lane_node_embedding.shape[0], -1) # B,164,32 
-        lanes_graphs.nodes['l'].data['inp'] = lane_node_enc
-        lanes_graphs.nodes['p'].data['inp'] = nbr_ped_enc
-        lanes_graphs.nodes['v'].data['inp'] = nbr_vehicle_enc
-        lane_node_enc = self.hgt_encoder(lanes_graphs, out_key='l') 
+        if False:
+            lanes_graphs.nodes['l'].data['inp'] = lane_node_enc
+            lanes_graphs.nodes['p'].data['inp'] = nbr_ped_enc
+            lanes_graphs.nodes['v'].data['inp'] = nbr_vehicle_enc
+            lane_node_enc = self.hgt_encoder(lanes_graphs, out_key='l')
+        h_dict = {'l': lane_node_enc, 'p': nbr_ped_enc, 'v': nbr_vehicle_enc}
+        lane_node_enc = self.hgt_encoder(lanes_graphs, h_dict)  
         lane_node_enc = self.scatter_batched_input(lane_node_enc, batch_lane_node_masks.unsqueeze(-1).unsqueeze(-1))
 
 

@@ -5,6 +5,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import math
+import dgl.nn.pytorch as dglnn
 
 
 # Conv layer with norm (gn or bn) and relu.
@@ -641,3 +642,128 @@ class HeteroRGCNLayer(nn.Module):
         # return the updated node feature dictionary
         return {ntype : G.nodes[ntype].data['h'] for ntype in G.ntypes}
 
+
+class ieHGCNConv(nn.Module):
+    r"""
+    The ieHGCN convolution layer.
+    Parameters
+    ----------
+    in_size: int
+        the input dimension
+    out_size: int
+        the output dimension
+    attn_size: int
+        the dimension of attention vector
+    ntypes: list
+        the node type list of a heterogeneous graph
+    etypes: list
+        the feature drop rate
+    activation: str
+        the activation function
+    """
+    def __init__(self, in_size, out_size, attn_size, ntypes, etypes, activation = F.elu):
+        super(ieHGCNConv, self).__init__()
+        node_size = {}
+        for ntype in ntypes:
+            node_size[ntype] = in_size
+        attn_vector = {}
+        for ntype in ntypes:
+            attn_vector[ntype] =  attn_size
+        self.W_self = dglnn.HeteroLinear(node_size, out_size)
+        self.W_al = dglnn.HeteroLinear(attn_vector, 1)
+        self.W_ar = dglnn.HeteroLinear(attn_vector, 1)
+        
+        # self.conv = dglnn.HeteroGraphConv({
+        #     etype: dglnn.GraphConv(in_size, out_size, norm = 'right', weight = True, bias = True)
+        #     for etype in etypes
+        # })
+        self.in_size = in_size
+        self.out_size = out_size
+        self.attn_size = attn_size
+        mods = {
+            etype: dglnn.GraphConv(in_size, out_size, norm = 'right', 
+                                   weight = True, bias = True, allow_zero_in_degree = True)
+            for etype in etypes
+            }
+        self.mods = nn.ModuleDict(mods)
+        
+        self.linear_q = nn.ModuleDict({ntype: nn.Linear(out_size, attn_size) for ntype in ntypes})
+        self.linear_k = nn.ModuleDict({ntype: nn.Linear(out_size, attn_size) for ntype in ntypes})
+        
+        self.activation = activation
+        
+
+    def forward(self, hg, h_dict):
+        """
+        The forward part of the ieHGCNConv.
+        
+        Parameters
+        ----------
+        hg : object
+            the dgl heterogeneous graph
+        h_dict: dict
+            the feature dict of different node types
+            
+        Returns
+        -------
+        dict
+            The embeddings after final aggregation.
+        """
+        outputs = {ntype: [] for ntype in hg.dsttypes}
+        with hg.local_scope():
+            hg.ndata['h'] = h_dict
+            # formulas (2)-1
+            hg.ndata['z'] = self.W_self(hg.ndata['h'])
+            query = {}
+            key = {}
+            attn = {}
+            attention = {}
+            
+            # formulas (3)-1 and (3)-2
+            for ntype in hg.dsttypes:
+                query[ntype] = self.linear_q[ntype](hg.ndata['z'][ntype])
+                key[ntype] = self.linear_k[ntype](hg.ndata['z'][ntype])
+            # formulas (4)-1
+            h_l = self.W_al(key)
+            h_r = self.W_ar(query)
+            for ntype in hg.dsttypes:
+                attention[ntype] = F.elu(h_l[ntype] + h_r[ntype])
+                attention[ntype] = attention[ntype].unsqueeze(0)
+            
+            for srctype, etype, dsttype in hg.canonical_etypes:
+                rel_graph = hg[srctype, etype, dsttype]
+                if srctype not in h_dict:
+                    continue
+                # formulas (2)-2
+                dstdata = self.mods[etype](
+                    rel_graph,
+                    (h_dict[srctype], h_dict[dsttype])
+                )
+                outputs[dsttype].append(dstdata)
+                # formulas (3)-3
+                attn[dsttype] = self.linear_k[dsttype](dstdata)
+                # formulas (4)-2
+                h_attn = self.W_al(attn)
+                attn.clear()
+                edge_attention = F.elu(h_attn[dsttype] + h_r[dsttype])
+                attention[dsttype] = torch.cat((attention[dsttype], edge_attention.unsqueeze(0)))
+
+            # formulas (5)
+            for ntype in hg.dsttypes:
+                attention[ntype] = F.softmax(attention[ntype], dim = 0)
+
+            # formulas (6)
+            rst = {ntype: 0 for ntype in hg.dsttypes}
+            for ntype, data in outputs.items():
+                data = [hg.ndata['z'][ntype]] + data
+                if len(data) != 0:
+                    for i in range(len(data)):
+                        aggregation = torch.mul(data[i], attention[ntype][i])
+                        rst[ntype] = aggregation + rst[ntype]
+                
+            # h = self.conv(hg, hg.ndata['h'], aggregate = self.my_agg_func)
+        if self.activation is not None:
+            for ntype in rst.keys():
+                rst[ntype] = self.activation(rst[ntype])
+            
+        return rst

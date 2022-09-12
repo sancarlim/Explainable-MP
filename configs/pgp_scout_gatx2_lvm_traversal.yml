@@ -3,7 +3,7 @@ dataset: 'nuScenes'
 version: 'v1.0-trainval'
 agent_setting: 'single_agent'
 input_representation: 'graphs'
-name: 'Whole Scene HGT 4l 1h p2p v2p fixed'
+name: 'HGCN'
 
 train_set_args: &ds_args
   split: 'train'
@@ -41,6 +41,8 @@ encoder_args:
   node_feat_size: 6
   node_emb_size: 16
   node_enc_size: 32
+  node_hgt_size: 64
+  node_out_hgt_size: 32
   nbr_feat_size: 5
   nbr_emb_size: 16
   nbr_enc_size: 32
