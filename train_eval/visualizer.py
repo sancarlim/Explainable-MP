@@ -1,4 +1,3 @@
-from cProfile import label
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -37,8 +36,7 @@ layers = [#'drivable_area',
           'road_segment',
           'road_block',
           'ped_crossing',
-          'walkway', 
-          'lane_divider']
+          'walkway',  ]
 
 
 class Visualizer:
@@ -62,6 +60,8 @@ class Visualizer:
         self.encoder_type = cfg['encoder_type']
         self.ns = spec_args[1][0]
         self.dataroot = data_root
+        self.show_predictions = True
+        self.tf = 4
 
         # Initialize model
         self.model = initialize_prediction_model(cfg['encoder_type'], cfg['aggregator_type'], cfg['decoder_type'],
@@ -108,12 +108,12 @@ class Visualizer:
         if not os.path.isdir(os.path.join(output_dir, 'results', 'gifs')):
             os.mkdir(os.path.join(output_dir, 'results', 'gifs'))
         start = time.time()
-        for n, indices in enumerate(index_list[-1:]):
+        for n, indices in enumerate(index_list[1:2]):
             imgs, fancy_img, graph_img, scene = self.generate_nuscenes_gif(indices)
-            filename = os.path.join(output_dir, 'example' + str(n) + scene  + '_fancy.gif')
+            filename = os.path.join(output_dir, 'example' + str(n) + scene  + '_nopredict.gif')
             imageio.mimsave(filename, fancy_img, format='GIF', fps=2)  
             for i,img in enumerate(fancy_img):
-                filename = os.path.join(output_dir, 'example' + str(n) + scene  + '_' + str(i) +'_perframe.png')
+                filename = os.path.join(output_dir, 'example' + str(n) + scene  + '_' + str(i) +'_nopredict.png')
                 plt.imsave(filename, img) 
             """ filename = os.path.join(output_dir, 'results', 'gifs', 'example' + str(n) + scene + '.gif')
             imageio.mimsave(filename, imgs, format='GIF', fps=2)
@@ -436,22 +436,23 @@ class Visualizer:
             sm_cool = plt.cm.ScalarMappable(cmap=cmap_cool , norm=plt.Normalize(vmin=0, vmax=1)) 
             cbar_cool = plt.colorbar(sm_cool)
             cbar_cool.set_label('Probability of each cluster', rotation=270) """
-            for n, traj in enumerate(predictions['traj'][0][:]):
-                """ ax[1].plot(traj[:, 0].detach().cpu().numpy(), traj[:, 1].detach().cpu().numpy(), lw=4,
-                           color='r', alpha=0.8)
-                ax[1].scatter(traj[-1, 0].detach().cpu().numpy(), traj[-1, 1].detach().cpu().numpy(), 60,
-                              color='r', alpha=0.8) """
-                global_traj = convert_local_coords_to_global(traj.detach().cpu().numpy(), agent_translation, agent_rotation)
-                if n == 0:
-                    ax2.plot(global_traj[:, 0], global_traj[:, 1], color=cmap_cool(4*predictions['probs'][0][n].detach().cpu().numpy()), 
-                                    lw=max(1,7*predictions['probs'][0][n]), linestyle = '--', alpha=0.8,label='Predicted Trajectory')
-                else: 
-                    ax2.plot(global_traj[:, 0], global_traj[:, 1], color=cmap_cool(4*predictions['probs'][0][n].detach().cpu().numpy()), 
-                                    lw=max(1,7*predictions['probs'][0][n]), linestyle = '--', alpha=0.8) 
-                """self.visualize_graph(fig3,ax3,data['inputs']['map_representation']['lane_node_feats'][0].detach().cpu().numpy(), 
-                                    data['inputs']['map_representation']['s_next'][0].detach().cpu().numpy(), data['inputs']['map_representation']['edge_type'][0].detach().cpu().numpy(),
-                                    data['ground_truth']['evf_gt'][0].detach().cpu().numpy(), data['inputs']['node_seq_gt'][0].detach().cpu().numpy(), traj.detach().cpu().numpy(), 
-                                    predictions['pi'][0].detach().cpu().numpy(), cmap_cool) """
+            if self.show_predictions: 
+                for n, traj in enumerate(predictions['traj'][0][:]):
+                    """ ax[1].plot(traj[:, 0].detach().cpu().numpy(), traj[:, 1].detach().cpu().numpy(), lw=4,
+                            color='r', alpha=0.8)
+                    ax[1].scatter(traj[-1, 0].detach().cpu().numpy(), traj[-1, 1].detach().cpu().numpy(), 60,
+                                color='r', alpha=0.8) """
+                    global_traj = convert_local_coords_to_global(traj.detach().cpu().numpy(), agent_translation, agent_rotation)
+                    if n == 0:
+                        ax2.plot(global_traj[:self.tf, 0], global_traj[:self.tf, 1], color=cmap_cool(4*predictions['probs'][0][n].detach().cpu().numpy()), 
+                                        lw=max(1,7*predictions['probs'][0][n]), linestyle = '--', alpha=0.8,label='Predicted Trajectory')
+                    else: 
+                        ax2.plot(global_traj[:self.tf, 0], global_traj[:self.tf, 1], color=cmap_cool(4*predictions['probs'][0][n].detach().cpu().numpy()), 
+                                        lw=max(1,7*predictions['probs'][0][n]), linestyle = '--', alpha=0.8) 
+                    """self.visualize_graph(fig3,ax3,data['inputs']['map_representation']['lane_node_feats'][0].detach().cpu().numpy(), 
+                                        data['inputs']['map_representation']['s_next'][0].detach().cpu().numpy(), data['inputs']['map_representation']['edge_type'][0].detach().cpu().numpy(),
+                                        data['ground_truth']['evf_gt'][0].detach().cpu().numpy(), data['inputs']['node_seq_gt'][0].detach().cpu().numpy(), traj.detach().cpu().numpy(), 
+                                        predictions['pi'][0].detach().cpu().numpy(), cmap_cool) """
             
             legend=ax2.legend(frameon=True, loc='upper right', facecolor='lightsteelblue', edgecolor='black', fontsize=9)
             handles, labels = ax2.get_legend_handles_labels() 
