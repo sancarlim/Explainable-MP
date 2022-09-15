@@ -69,7 +69,7 @@ class Trainer:
         self.val_metrics = [initialize_metric(cfg['val_metrics'][i], cfg['val_metric_args'][i])
                             for i in range(len(cfg['val_metrics']))]
         self.val_metric = math.inf
-        self.min_val_metric = math.inf
+        self.min_val_metric = 1.36
 
         # Print metrics after these many minibatches to keep track of training
         self.log_period = len(self.tr_dl)//cfg['log_freq']
@@ -82,7 +82,7 @@ class Trainer:
         if self.wandb_writer is not None:
             self.wandb_writer.watch(
                         self.model,
-                        criterion=self.val_metric,
+                        criterion=self.val_metrics[0].name,
                         log= None,
                         log_freq = 1000, 
                         log_graph= True
@@ -138,9 +138,10 @@ class Trainer:
             if self.val_metric < self.min_val_metric:
                 self.min_val_metric = self.val_metric
                 self.save_checkpoint(os.path.join(output_dir, 'checkpoints', 'best.tar'))
+                self.wandb_writer.log({"best_val_ade_5": self.min_val_metric, "epoch_best_val": self.current_epoch})
 
             # Save checkpoint
-            self.save_checkpoint(os.path.join(output_dir, 'checkpoints', str(self.current_epoch) + '.tar'))
+            # self.save_checkpoint(os.path.join(output_dir, 'checkpoints', str(self.current_epoch) + '.tar'))
 
     def run_epoch(self, mode: str, dl: torch_data.DataLoader):
         """

@@ -3,7 +3,7 @@ dataset: 'nuScenes'
 version: 'v1.0-trainval'
 agent_setting: 'single_agent'
 input_representation: 'graphs'
-name: 'HGCN'
+name: 'HGCN 64bs (2l pre-train)'
 
 train_set_args: &ds_args
   split: 'train'
@@ -25,33 +25,29 @@ test_set_args:
   split: 'val'
   random_flips: False
 
-batch_size: 16
+batch_size: 64
 num_workers: 128
   
 encoder_type: 'pgp_scout_encoder'
 encoder_args:
   target_agent_feat_size: 5
   target_agent_emb_size: 16
-  target_agent_enc_size: 32
-  num_heads_agents: 1
+  target_agent_enc_size: 32 
   num_heads_lanes: [1, 1, 1, 1, 1]
   feat_drop: 0.0
   attn_drop: 0.0
-  num_layers: 3
+  num_layers: 2
   node_feat_size: 6
   node_emb_size: 16
   node_enc_size: 32
-  node_hgt_size: 64
+  node_hgt_size: 32
   node_out_hgt_size: 32
   nbr_feat_size: 5
   nbr_emb_size: 16
   nbr_enc_size: 32
-  num_gat_layers: 2
-  agent_mask_prob_v: 0
-  agent_mask_prob_p: 0
-  lane_mask_prob: 0.
+  num_gat_layers: 2 
   num_heads: 1
-  heterograph: True
+  hgt: False
 
 
 # Aggregator parameters
