@@ -113,20 +113,25 @@ def collate_fn_dgl_hetero(batch):
         adj = element['inputs']['surrounding_agent_representation']['adj_matrix'] 
         len_adj = element['inputs']['surrounding_agent_representation']['len_adj']  
         lane_veh_adj_matrix = element['inputs']['agent_node_masks']['vehicles'].transpose(1,0) # 84 x 164 
-        lane_ped_adj_matrix = element['inputs']['agent_node_masks']['pedestrians'].transpose(1,0) # 84 x 164
-        lane_veh_u, lane_veh_v = np.where(lane_veh_adj_matrix==0)
+        lane_ped_adj_matrix = element['inputs']['agent_node_masks']['pedestrians'].transpose(1,0) # 84 x 164 
+        lane_node_masks = element['inputs']['map_representation']['lane_node_masks']
+        # create a mask for the lanes that are not empty
+        lane_mask = (~(lane_node_masks[:,:,0]!=0)).any(-1) # 164
+        # Add row of zeros to the adjacency matrix to account for the focal vehicle
+        lane_veh_adj_matrix = np.vstack((~lane_mask*1, lane_veh_adj_matrix)) # 85 x 164
+        veh_lane_u, veh_lane_v = np.where(lane_veh_adj_matrix==0)
         lane_ped_u, lane_ped_v = np.where(lane_ped_adj_matrix==0)
         veh_mask=element['inputs']['surrounding_agent_representation']['vehicle_masks']
         ped_mask=element['inputs']['surrounding_agent_representation']['pedestrian_masks']
-        num_v = np.where(veh_mask[:,:,0]==0)[0].max()+1 if len(np.where(veh_mask[:,:,0]==0)[0])>0 else 0
+        num_v = np.where(veh_mask[:,:,0]==0)[0].max()+2 if len(np.where(veh_mask[:,:,0]==0)[0])>0 else 0 # +1 to account for focal agent which is not present in veh_mask
         num_p = np.where(ped_mask[:,:,0]==0)[0].max()+1 if len(np.where(ped_mask[:,:,0]==0)[0])>0 else 0
-        adj_matrix_v = adj[1:num_v+1, 1:num_v+1] # +1 to account for focal agent which we exclude
-        adj_matrix_p = adj[num_v+1:num_v+1+num_p, num_v+1:num_v+1+num_p]
+        adj_matrix_v = adj[:num_v, :num_v] 
+        adj_matrix_p = adj[num_v:num_v+num_p, num_v:num_v+num_p]
         veh_u, veh_v = np.nonzero(adj_matrix_v)
         ped_u, ped_v = np.nonzero(adj_matrix_p)
-        veh_ped_u, veh_ped_v = np.where(adj[1:num_v+1, num_v+1:] == 1)  
+        ped_veh_u, ped_veh_v = np.where(adj[num_v:num_v+num_p, :num_v] == 1)  
         # mask those pedestrians that don't appear in the interaction graph v2p
-        max_p_in_graph = veh_ped_v.max()+1 if len(veh_ped_v)>0 else 0
+        max_p_in_graph = ped_veh_u.max()+1 if len(ped_veh_u)>0 else 0
         ped_mask[max_p_in_graph:,:, :] = 1
         element['inputs']['surrounding_agent_representation']['pedestrian_masks'] =  ped_mask 
         # interaction_graphs.append(dgl.from_scipy(spp.coo_matrix(adj_matrix)).int())
@@ -140,11 +145,11 @@ def collate_fn_dgl_hetero(batch):
             dgl.heterograph({
             ('l','successor','l'): (torch.tensor(succ_u, dtype=torch.int), torch.tensor(succ_v, dtype=torch.int)),
             ('l','proximal','l'):  (torch.tensor(prox_u, dtype=torch.int), torch.tensor(prox_v, dtype=torch.int)),
-            ('v', 'v_close_l','l'): (torch.tensor(lane_veh_u, dtype=torch.int), torch.tensor(lane_veh_v, dtype=torch.int)),
+            ('v', 'v_close_l','l'): (torch.tensor(veh_lane_u, dtype=torch.int), torch.tensor(veh_lane_v, dtype=torch.int)),
             ('v', 'v_interact_v','v'): (torch.tensor(veh_u, dtype=torch.int), torch.tensor(veh_v, dtype=torch.int)),  
-            ('v', 'v_interact_p','p'): (torch.tensor(veh_ped_u, dtype=torch.int), torch.tensor(veh_ped_v, dtype=torch.int)),  
+            ('p', 'p_interact_v','v'): (torch.tensor(ped_veh_u, dtype=torch.int), torch.tensor(ped_veh_v, dtype=torch.int)),  
         }) )
-        if len(ped_mask)-len(np.nonzero(ped_mask[:,0,0])[0]) != lanes_graphs[-1].num_nodes('p'):
+        if len(veh_mask)+1-len(np.nonzero(veh_mask[:,0,0])[0]) != lanes_graphs[-1].num_nodes('v'):
             print('stop')
         
     #interaction_batched_graph = dgl.batch(interaction_graphs)

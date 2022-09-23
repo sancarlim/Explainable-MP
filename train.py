@@ -24,7 +24,7 @@ parser.add_argument('--encoder_args.feat_drop', type=float, default=0.)
 parser.add_argument('--encoder_args.attn_drop', type=float, default=0.)
 parser.add_argument('--encoder_args.num_layers', type=int, default=3)
 parser.add_argument('--encoder_args.node_hgt_size', type=int, default=32)
-parser.add_argument('--encoder_args.hgt', type=bool, default=True)
+parser.add_argument('--encoder_args.hgt', type=bool, default=False)
 parser.add_argument('--optim_args.scheduler_step', type=int, default=10)
 parser.add_argument('--optim_args.lr', type=float, default=0.001)
 parser.add_argument('--batch_size', type=int, default=16)
@@ -32,23 +32,9 @@ parser.add_argument('--batch_size', type=int, default=16)
 
 args = parser.parse_args()
 
-
-# Make directories
-if not os.path.isdir(args.output_dir):
-    os.mkdir(args.output_dir)
-if not os.path.isdir(os.path.join(args.output_dir, 'checkpoints')):
-    os.mkdir(os.path.join(args.output_dir, 'checkpoints'))
-if not os.path.isdir(os.path.join(args.output_dir, 'tensorboard_logs')):
-    os.mkdir(os.path.join(args.output_dir, 'tensorboard_logs'))
-
-
 # Load config
 with open(args.config, 'r') as yaml_file:
     cfg = yaml.safe_load(yaml_file)
-
-
-# Initialize tensorboard writer
-writer = SummaryWriter(log_dir=os.path.join(args.output_dir, 'tensorboard_logs'))
 
 # Initialize wandb loger
 wandb_logger = None
@@ -78,6 +64,18 @@ if not args.nowandb:
         cfg['decoder_args'].update({'encoding_size': enc_args['target_agent_enc_size']*5})
         wandb.config.update(cfg, allow_val_change=True)
         args.output_dir = os.path.join(args.output_dir, wandb.run.name)
+
+
+# Make directories
+if not os.path.isdir(args.output_dir):
+    os.mkdir(args.output_dir)
+if not os.path.isdir(os.path.join(args.output_dir, 'checkpoints')):
+    os.mkdir(os.path.join(args.output_dir, 'checkpoints'))
+if not os.path.isdir(os.path.join(args.output_dir, 'tensorboard_logs')):
+    os.mkdir(os.path.join(args.output_dir, 'tensorboard_logs'))
+
+# Initialize tensorboard writer
+writer = SummaryWriter(log_dir=os.path.join(args.output_dir, 'tensorboard_logs'))
 
 # Train
 trainer = Trainer(cfg, args.data_root, args.data_dir, checkpoint_path=args.checkpoint, writer=writer, wandb_writer=wandb_logger)

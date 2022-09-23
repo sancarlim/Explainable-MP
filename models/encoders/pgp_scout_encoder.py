@@ -292,10 +292,11 @@ class PGP_SCOUTEncoder(PredictionEncoder):
         self.hgt = args['hgt']
         if args['hgt']: 
             # HeteroGraph Transformer
-            self.hgt_encoder = HGT({'l':0, 'p':1, 'v':2}, {'proximal':0, 'successor':1, 'v_close_l':2,'v_interact_v':3,'v_interact_p':4 }, args['node_enc_size'], args['node_hgt_size'], 
+            self.hgt_encoder = HGT({'l':0, 'v':1, 'p':2}, {'proximal':0, 'successor':1, 'v_close_l':2,'v_interact_v':3,'p_interact_v':4 }, args['node_enc_size'], args['node_hgt_size'], 
                                     args['node_out_hgt_size'], args['num_layers'], args['num_heads_lanes'], use_norm=True)
         else:   
-            self.hgt_encoder = ieHGCN(args['num_layers'], args['node_enc_size'], args['node_hgt_size'], args['node_out_hgt_size'], attn_dim=args['node_hgt_size'], ntypes={'l':0, 'p':1, 'v':2},etypes={'proximal':0, 'successor':1, 'v_close_l':2,'v_interact_v':3,'v_interact_p':4 })
+            self.hgt_encoder = ieHGCN(args['num_layers'], args['node_enc_size'], args['node_hgt_size'], args['node_out_hgt_size'], attn_dim=args['node_hgt_size'], ntypes={'l':0, 'v':1, 'p':2},
+                                    etypes={'proximal':0, 'successor':1, 'v_close_l':2,'v_interact_v':3,'p_interact_v':4 })
 
         
         # Agent interaction (agent||veh_nbr||ped_nbr -» agent_nbr_context) ! 
@@ -359,7 +360,7 @@ class PGP_SCOUTEncoder(PredictionEncoder):
         nbr_vehicle_feats = torch.cat((nbr_vehicle_feats, torch.zeros_like(nbr_vehicle_feats[:, :, :, 0:1])), dim=-1)
         nbr_vehicle_masks = inputs['surrounding_agent_representation']['vehicle_masks']
         nbr_vehicle_embedding = self.leaky_relu(self.nbr_emb(nbr_vehicle_feats))
-        nbr_vehicle_enc = self.variable_size_gru_encode(nbr_vehicle_embedding, nbr_vehicle_masks, self.nbr_enc, batched=True) #B,84,32
+        nbr_vehicle_enc = self.variable_size_gru_encode(nbr_vehicle_embedding, nbr_vehicle_masks, self.nbr_enc, batched=False) #B,84,32
         _, masks_for_batching_veh = self.create_batched_input(nbr_vehicle_feats, nbr_vehicle_masks)
         nbr_ped_feats = inputs['surrounding_agent_representation']['pedestrians']
         nbr_ped_feats = torch.cat((nbr_ped_feats, torch.ones_like(nbr_ped_feats[:, :, :, 0:1])), dim=-1)
@@ -369,18 +370,11 @@ class PGP_SCOUTEncoder(PredictionEncoder):
         _, masks_for_batching_ped = self.create_batched_input(nbr_ped_feats, nbr_ped_masks) 
 
 
-        # interaction_feats = torch.cat((target_agent_enc.unsqueeze(1),nbr_vehicle_enc, nbr_ped_enc), dim=1)
-        # target_masks = torch.ones((target_agent_enc.shape[0], 1, 1), device=target_agent_enc.device).bool()
-        # interaction_masks = torch.cat((target_masks, masks_for_batching_veh.squeeze(-1),masks_for_batching_ped.squeeze(-1)), dim=1).repeat(1,1,interaction_feats.shape[-1])
-        # interaction_feats_batched = torch.masked_select(interaction_feats, interaction_masks!=0) 
-        # interaction_feats_batched = interaction_feats_batched.view(-1, interaction_feats.shape[2]) # BN,32
-
-        # # Use mask for batching 
-        # """ 
-        # sum=0
-        # for i, len_nbr in enumerate(inputs['surrounding_agent_representation']['len_adj']):
-        #     interaction_feats = torch.cat((target_agent_enc[i].unsqueeze(0), nbr_enc[sum:sum+len_nbr-1]), dim=0) 
-        #     sum+=len_nbr-1 """
+        interaction_feats = torch.cat((target_agent_enc.unsqueeze(1),nbr_vehicle_enc), dim=1)
+        target_masks = torch.ones((target_agent_enc.shape[0], 1, 1), device=target_agent_enc.device).bool()
+        interaction_masks = torch.cat((target_masks, masks_for_batching_veh.squeeze(-1)), dim=1).repeat(1,1,interaction_feats.shape[-1])
+        interaction_feats_batched = torch.masked_select(interaction_feats, interaction_masks!=0) 
+        interaction_feats_batched = interaction_feats_batched.view(-1, interaction_feats.shape[2]) # BN,32
         
         # # Agent interaction (agent||veh_nbr||ped_nbr [32,162,32]-» agent_nbr_context) ! 
         # interaction_graph = inputs['interaction_graphs'].to(target_agent_feats.device) 
@@ -414,13 +408,14 @@ class PGP_SCOUTEncoder(PredictionEncoder):
         if self.hgt:
             lanes_graphs.nodes['l'].data['inp'] = lane_node_enc
             lanes_graphs.nodes['p'].data['inp'] = nbr_ped_enc
-            lanes_graphs.nodes['v'].data['inp'] = nbr_vehicle_enc
+            lanes_graphs.nodes['v'].data['inp'] = interaction_feats_batched
             lane_node_enc = self.hgt_encoder(lanes_graphs, out_key='l')
         else:
-            h_dict = {'l': lane_node_enc, 'p': nbr_ped_enc, 'v': nbr_vehicle_enc}
-            lane_node_enc = self.hgt_encoder(lanes_graphs, h_dict)  
+            h_dict = {'l': lane_node_enc, 'p': nbr_ped_enc, 'v': interaction_feats_batched }
+            lane_node_enc, interaction_feats_batched = self.hgt_encoder(lanes_graphs, h_dict)  
         lane_node_enc = self.scatter_batched_input(lane_node_enc, batch_lane_node_masks.unsqueeze(-1).unsqueeze(-1))
-
+        interaction_feats = self.scatter_batched_input(interaction_feats_batched, interaction_masks[:,:,-1:].unsqueeze(-1)) # B, N, 32
+        target_agent_enc = torch.cat((target_agent_enc, interaction_feats[:,0]), dim=-1) # B, 32
 
         # Agent-node attention (between nbrs and lanes)  
         # veh_interaction_feats = torch.cuda.FloatTensor(interaction_feats.shape[0],nbr_vehicle_feats.shape[1], interaction_feats.shape[-1])
