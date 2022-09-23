@@ -346,12 +346,20 @@ class Visualizer:
                     veh_box.zorder = 5
                     ax2.add_artist(veh_box)                 
                     # ax2.annotate(str(n), (history[-1, 0], history[-1, 1]), fontsize=10, zorder=10)
-                else: 
+                elif ann['category_name'].split('.')[0] == 'human': 
                     circle = plt.Circle((history[-1, 0],
                                 history[-1, 1]),
                                 node_circle_size,
                                 facecolor='c',
                                 edgecolor='c',
+                                lw=circle_edge_width,
+                                zorder=3)
+                else: 
+                    circle = plt.Circle((history[-1, 0],
+                                history[-1, 1]),
+                                node_circle_size,
+                                facecolor='r',
+                                edgecolor='r',
                                 lw=circle_edge_width,
                                 zorder=3)
                     ax2.add_artist(circle)
