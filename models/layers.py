@@ -559,7 +559,7 @@ class HGTLayer(nn.Module):
         nn.init.xavier_uniform_(self.relation_att)
         nn.init.xavier_uniform_(self.relation_msg)
 
-    def forward(self, G, h):
+    def forward(self, G, h, out_key):
         with G.local_scope():
             node_dict, edge_dict = self.node_dict, self.edge_dict
             for srctype, etype, dsttype in G.canonical_etypes:
@@ -597,19 +597,22 @@ class HGTLayer(nn.Module):
 
             new_h = {}
             for ntype in G.ntypes:
-                '''
-                    Step 3: Target-specific Aggregation
-                    x = norm( W[node_type] * gelu( Agg(x) ) + x )
-                '''
-                n_id = node_dict[ntype]
-                alpha = torch.sigmoid(self.skip[n_id])
-                t = G.nodes[ntype].data['t'].view(-1, self.out_dim)
-                trans_out = self.drop(self.a_linears[n_id](t))
-                trans_out = trans_out * alpha + h[ntype] * (1-alpha)
-                if self.use_norm:
-                    new_h[ntype] = self.norms[n_id](trans_out)
+                if ntype in out_key:
+                    '''
+                        Step 3: Target-specific Aggregation
+                        x = norm( W[node_type] * gelu( Agg(x) ) + x )
+                    '''
+                    n_id = node_dict[ntype]
+                    alpha = torch.sigmoid(self.skip[n_id])
+                    t = G.nodes[ntype].data['t'].view(-1, self.out_dim)
+                    trans_out = self.drop(self.a_linears[n_id](t))
+                    trans_out = trans_out * alpha + h[ntype] * (1-alpha)
+                    if self.use_norm:
+                        new_h[ntype] = self.norms[n_id](trans_out)
+                    else:
+                        new_h[ntype] = trans_out
                 else:
-                    new_h[ntype] = trans_out
+                    new_h[ntype] = h[ntype]
             return new_h
 
 
@@ -681,8 +684,10 @@ class ieHGCNConv(nn.Module):
         self.out_size = out_size
         self.attn_size = attn_size
         mods = {
-            etype: dglnn.GraphConv(in_size, out_size, norm = 'right', 
-                                   weight = True, bias = True, allow_zero_in_degree = True)
+            #etype: dglnn.GraphConv(in_size, out_size, norm = 'right', 
+            #                       weight = True, bias = True, allow_zero_in_degree = True)
+            etype: dglnn.GATv2Conv(in_size, out_size, num_heads = 1, feat_drop = 0.0, attn_drop = 0.0, 
+                                   bias = True, allow_zero_in_degree = True)
             for etype in etypes
             }
         self.mods = nn.ModuleDict(mods)
@@ -738,7 +743,8 @@ class ieHGCNConv(nn.Module):
                 dstdata = self.mods[etype](
                     rel_graph,
                     (h_dict[srctype], h_dict[dsttype])
-                )
+                ).squeeze(-2)
+                
                 outputs[dsttype].append(dstdata)
                 # formulas (3)-3
                 attn[dsttype] = self.linear_k[dsttype](dstdata)

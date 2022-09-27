@@ -40,21 +40,21 @@ encoder_args:
   node_feat_size: 6
   node_emb_size: 16
   node_enc_size: 32
-  node_hgt_size: 32
+  node_attn_size: 32
   node_out_hgt_size: 32
   nbr_feat_size: 5
   nbr_emb_size: 16
   nbr_enc_size: 32
   num_gat_layers: 2 
   num_heads: 1
-  hgt: False
+  hg: "hgcn"
 
 
 # Aggregator parameters
 aggregator_type: 'pgp'
 aggregator_args:
-  pre_train: True
-  target_agent_enc_size: 32
+  pre_train: False
+  target_agent_enc_size: 64
   node_enc_size: 32
   pi_h1_size: 32
   pi_h2_size: 32
@@ -70,7 +70,7 @@ decoder_args:
   num_samples: 1000
   op_len: 12
   hidden_size: 128
-  encoding_size: 160
+  encoding_size: 192
   agg_type: 'sample_specific'
   lv_dim: 5
   num_clusters: 10

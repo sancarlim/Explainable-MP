@@ -5,7 +5,7 @@ import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence
 from typing import Dict, List
 from torch import Tensor
-from models.heterograph_models import HGT, ieHGCN 
+from models.heterograph_models import HGT, ieHGCN, SimpleHGN
 import torch.nn.functional as F 
 from dgl import DGLError
 from dgl.nn import GATv2Conv 
@@ -285,18 +285,20 @@ class PGP_SCOUTEncoder(PredictionEncoder):
         self.nbr_enc = nn.GRU(args['nbr_emb_size'], args['nbr_enc_size'], batch_first=True)
 
         # Node encoders
-        self.node_emb = nn.Linear(args['node_feat_size']+1, args['node_emb_size'])
-        # PGP encoder
+        self.node_emb = nn.Linear(args['node_feat_size']+1, args['node_emb_size']) 
         self.node_gru_encoder = nn.GRU(args['node_emb_size'], args['node_enc_size'], batch_first=True)
 
-        self.hgt = args['hgt']
-        if args['hgt']: 
+        self.hg = args['hg']
+        if args['hg'] == 'hgt': 
             # HeteroGraph Transformer
-            self.hgt_encoder = HGT({'l':0, 'v':1, 'p':2}, {'proximal':0, 'successor':1, 'v_close_l':2,'v_interact_v':3,'p_interact_v':4 }, args['node_enc_size'], args['node_hgt_size'], 
+            self.hg_encoder = HGT({'l':0, 'v':1, 'p':2}, {'proximal':0, 'successor':1, 'v_close_l':2,'v_interact_v':3,'p_interact_v':4 }, args['node_enc_size'], args['node_attn_size'], 
                                     args['node_out_hgt_size'], args['num_layers'], args['num_heads_lanes'], use_norm=True)
-        else:   
-            self.hgt_encoder = ieHGCN(args['num_layers'], args['node_enc_size'], args['node_hgt_size'], args['node_out_hgt_size'], attn_dim=args['node_hgt_size'], ntypes={'l':0, 'v':1, 'p':2},
+        elif args['hg'] == 'hgcn':   
+            self.hg_encoder = ieHGCN(args['num_layers'], args['node_enc_size'], args['node_enc_size'], args['node_out_hgt_size'], attn_dim=args['node_attn_size'], ntypes={'l':0, 'v':1, 'p':2},
                                     etypes={'proximal':0, 'successor':1, 'v_close_l':2,'v_interact_v':3,'p_interact_v':4 })
+        else:
+            self.hg_encoder = SimpleHGN(edge_dim=args['node_attn_size'], num_etypes=5, in_dim=args['node_enc_size'], hidden_dim=args['node_enc_size'], num_classes=args['node_out_hgt_size'], 
+                                    num_layers=args['num_layers'], heads=args['num_heads_lanes'])
 
         
         # Agent interaction (agent||veh_nbr||ped_nbr -» agent_nbr_context) ! 
@@ -401,21 +403,20 @@ class PGP_SCOUTEncoder(PredictionEncoder):
         lane_node_masks = inputs['map_representation']['lane_node_masks'] 
         lane_node_feats = torch.cat((lane_node_feats, lane_node_masks[:,:,:,:1]), dim=-1)
         batch_lane_node_masks = (~(lane_node_masks[:,:,:,0]!=0)).any(-1)
-        lane_node_feats_batched = lane_node_feats[batch_lane_node_masks] # BN,32
+        lane_node_feats_batched = lane_node_feats[batch_lane_node_masks] # BN,20,7
         lane_node_embedding = self.leaky_relu(self.node_emb(lane_node_feats)) 
-        lane_node_enc = self.variable_size_gru_encode(lane_node_embedding, lane_node_masks, self.node_gru_encoder, batched=True)
-        #lane_node_embedding = lane_node_embedding.view(lane_node_embedding.shape[0], -1) # B,164,32 
-        if self.hgt:
+        lane_node_enc = self.variable_size_gru_encode(lane_node_embedding, lane_node_masks, self.node_gru_encoder, batched=True) 
+        if self.hg=="hgt":
             lanes_graphs.nodes['l'].data['inp'] = lane_node_enc
             lanes_graphs.nodes['p'].data['inp'] = nbr_ped_enc
             lanes_graphs.nodes['v'].data['inp'] = interaction_feats_batched
-            lane_node_enc = self.hgt_encoder(lanes_graphs, out_key='l')
+            lane_node_enc, interaction_feats_batched = self.hg_encoder(lanes_graphs, out_key=['l','v'])
         else:
             h_dict = {'l': lane_node_enc, 'p': nbr_ped_enc, 'v': interaction_feats_batched }
-            lane_node_enc, interaction_feats_batched = self.hgt_encoder(lanes_graphs, h_dict)  
+            lane_node_enc, interaction_feats_batched = self.hg_encoder(lanes_graphs, h_dict)  
         lane_node_enc = self.scatter_batched_input(lane_node_enc, batch_lane_node_masks.unsqueeze(-1).unsqueeze(-1))
         interaction_feats = self.scatter_batched_input(interaction_feats_batched, interaction_masks[:,:,-1:].unsqueeze(-1)) # B, N, 32
-        target_agent_enc = torch.cat((target_agent_enc, interaction_feats[:,0]), dim=-1) # B, 32
+        target_agent_enc = torch.cat((target_agent_enc, interaction_feats[:,0]), dim=-1) # B, 64
 
         # Agent-node attention (between nbrs and lanes)  
         # veh_interaction_feats = torch.cuda.FloatTensor(interaction_feats.shape[0],nbr_vehicle_feats.shape[1], interaction_feats.shape[-1])
@@ -453,8 +454,7 @@ class PGP_SCOUTEncoder(PredictionEncoder):
         # Return encodings
         encodings = {'target_agent_encoding': target_agent_enc, #before interaction
                      'context_encoding': {'combined': lane_node_enc,
-                                          'combined_masks': lane_node_masks,
-                                          'interaction'
+                                          'combined_masks': lane_node_masks, 
                                           'map': None,
                                           'vehicles': None,
                                           'pedestrians': None,
