@@ -97,7 +97,7 @@ class NuScenesGraphs(NuScenesVector):
         polygons = self.get_polygons_around_agent(global_pose, map_api)
 
         # Get vectorized represlane_idsentation of lanes
-        lane_node_feats, lane_ids = self.get_lane_node_feats(global_pose, lanes, polygons)
+        lane_node_feats, lane_ids = self.get_lane_node_feats(global_pose, lanes, polygons, map_api)
 
         # Discard lanes outside map extent
         lane_node_feats, lane_ids = self.discard_poses_outside_extent(lane_node_feats, lane_ids)
@@ -111,7 +111,7 @@ class NuScenesGraphs(NuScenesVector):
 
         # Add dummy node (0, 0, 0, 0, 0, 0) if no lane nodes are found
         if len(lane_node_feats) == 0:
-            lane_node_feats = [np.zeros((1, 6))]
+            lane_node_feats = [np.zeros((1, 8))]
             e_succ = [[]]
             e_prox = [[]]
 
@@ -131,7 +131,7 @@ class NuScenesGraphs(NuScenesVector):
         succ_adj_matrix, prox_adj_matrix = self.build_adj_mat_directional_with_types(s_next, edge_type)
         
         # Convert list of lane node feats to fixed size numpy array and masks
-        lane_node_feats, lane_node_masks = self.list_to_tensor(lane_node_feats, self.max_nodes, self.polyline_length, 6)
+        lane_node_feats, lane_node_masks = self.list_to_tensor(lane_node_feats, self.max_nodes, self.polyline_length, 8)
 
         map_representation = {
             'lane_node_feats': lane_node_feats,

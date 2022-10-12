@@ -16,6 +16,14 @@ from scipy import spatial
 import dgl
 import scipy.sparse as spp
 
+mapping_dict = {
+            'YIELD':1,
+            'STOP_SIGN':1,
+            'PED_CROSSING':0, #truck_bus
+            'TURN_STOP':2,
+            'TRAFFIC_LIGHT': 3
+        }
+
 
 class NuScenesVector(NuScenesTrajectories):
     """
@@ -179,21 +187,21 @@ class NuScenesVector(NuScenesTrajectories):
         polygons = self.get_polygons_around_agent(global_pose, map_api)
 
         # Get vectorized representation of lanes
-        lane_node_feats, _ = self.get_lane_node_feats(global_pose, lanes, polygons)
+        lane_node_feats, _ = self.get_lane_node_feats(global_pose, lanes, polygons, map_api)
 
         # Discard lanes outside map extent
         lane_node_feats = self.discard_poses_outside_extent(lane_node_feats)
 
         # Add dummy node (0, 0, 0, 0, 0) if no lane nodes are found
         if len(lane_node_feats) == 0:
-            lane_node_feats = [np.zeros((1, 5))]
+            lane_node_feats = [np.zeros((1, 7))]
 
         # While running the dataset class in 'compute_stats' mode:
         if self.mode == 'compute_stats':
             return len(lane_node_feats)
 
         # Convert list of lane node feats to fixed size numpy array and masks
-        lane_node_feats, lane_node_masks = self.list_to_tensor(lane_node_feats, self.max_nodes, self.polyline_length, 5)
+        lane_node_feats, lane_node_masks = self.list_to_tensor(lane_node_feats, self.max_nodes, self.polyline_length, 7)
 
         map_representation = {
             'lane_node_feats': lane_node_feats,
@@ -328,17 +336,17 @@ class NuScenesVector(NuScenesTrajectories):
         """
         x, y, _ = global_pose
         radius = max(self.map_extent)
-        record_tokens = map_api.get_records_in_radius(x, y, radius, ['stop_line', 'ped_crossing'])
+        record_tokens = map_api.get_records_in_radius(x, y, radius, ['ped_crossing','stop_line'])
         polygons = {k: [] for k in record_tokens.keys()}
         for k, v in record_tokens.items():
             for record_token in v:
                 polygon_token = map_api.get(k, record_token)['polygon_token']
-                polygons[k].append(map_api.extract_polygon(polygon_token))
+                polygons[k].append({record_token: map_api.extract_polygon(polygon_token)})
 
         return polygons
 
     def get_lane_node_feats(self, origin: Tuple, lanes: Dict[str, List[Tuple]],
-                            polygons: Dict[str, List[Polygon]]) -> Tuple[List[np.ndarray], List[str]]:
+                            polygons: Dict[str, List[Polygon]], map_api: NuScenesMap) -> Tuple[List[np.ndarray], List[str]]:
         """
         Generates vector HD map representation in the agent centric frame of reference
         :param origin: (x, y, yaw) of target agent in global co-ordinates
@@ -352,7 +360,7 @@ class NuScenesVector(NuScenesTrajectories):
         lanes = [v for k, v in lanes.items()]
 
         # Get flags indicating whether a lane lies on stop lines or crosswalks
-        lane_flags = self.get_lane_flags(lanes, polygons)
+        lane_flags = self.get_lane_flags(lanes, polygons, map_api)
 
         # Convert lane polylines to local coordinates:
         lanes = [np.asarray([self.global_to_local(origin, pose) for pose in lane]) for lane in lanes]
@@ -543,7 +551,7 @@ class NuScenesVector(NuScenesTrajectories):
         return lane_segments, lane_segment_ids
 
     @staticmethod
-    def get_lane_flags(lanes: List[List[Tuple]], polygons: Dict[str, List[Polygon]]) -> List[np.ndarray]:
+    def get_lane_flags(lanes: List[List[Tuple]], polygons: Dict[str, List[Polygon]], map_api: NuScenesMap) -> List[np.ndarray]:
         """
         Returns flags indicating whether each pose on lane polylines lies on polygon map layers
         like stop-lines or cross-walks
@@ -552,14 +560,16 @@ class NuScenesVector(NuScenesTrajectories):
         :return lane_flags: list of ndarrays with flags
         """
 
-        lane_flags = [np.zeros((len(lane), len(polygons.keys()))) for lane in lanes]
+        lane_flags = [np.zeros((len(lane), len(mapping_dict.keys())-1)) for lane in lanes]
         for lane_num, lane in enumerate(lanes):
             for pose_num, pose in enumerate(lane):
                 point = Point(pose[0], pose[1])
                 for n, k in enumerate(polygons.keys()):
                     polygon_list = polygons[k]
-                    for polygon in polygon_list:
-                        if polygon.contains(point):
+                    for polygon in polygon_list: 
+                        if list(polygon.values())[0].contains(point):
+                            if k == 'stop_line':
+                                n = mapping_dict[map_api.get('stop_line',list(polygon.keys())[0] )['stop_line_type']] 
                             lane_flags[lane_num][pose_num][n] = 1
                             break
 
