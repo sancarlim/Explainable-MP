@@ -43,13 +43,14 @@ class PGPEncoder(PredictionEncoder):
         # Node encoders
         self.node_emb = nn.Linear(args['node_feat_size'], args['node_emb_size'])
         self.node_encoder = nn.GRU(args['node_emb_size'], args['node_enc_size'], batch_first=True)
-        self.lane_mask_prob = args['lane_mask_prob']
+        self.lane_mask_prob = args['lane_mask_p']
 
         # Surrounding agent encoder
         self.nbr_emb = nn.Linear(args['nbr_feat_size'] + 1, args['nbr_emb_size'])
         self.nbr_enc = nn.GRU(args['nbr_emb_size'], args['nbr_enc_size'], batch_first=True)
-        self.agent_mask_prob_v = args['agent_mask_prob_v']
-        self.agent_mask_prob_p = args['agent_mask_prob_p']
+        self.agent_mask_prob_v = args['agent_mask_p_veh']
+        self.agent_mask_prob_p = args['agent_mask_p_ped']
+        self.mask_frames_prob = 1-args['mask_frames_p']
 
         # Agent-node attention
         self.query_emb = nn.Linear(args['node_enc_size'], args['node_enc_size'])
@@ -117,12 +118,13 @@ class PGPEncoder(PredictionEncoder):
         
 
         ###### Mask out only some frames of vehicles that are in the radius of 20m from agent
-        target_adj_matrix = inputs['surrounding_agent_representation']['adj_matrix'][:,0,1:nbr_vehicle_feats.shape[1]+1] 
-        target_adj_matrix = target_adj_matrix.unsqueeze(-1).repeat(1,1,nbr_vehicle_feats.shape[2])         
-        # Mask out frames of nearby agents with a 60% probability
-        target_adj_matrix *= torch.bernoulli(target_adj_matrix * 0.8) #torch.randn(target_adj_matrix.shape,device=device ) < 0.6  
-        nbr_vehicle_masks = nbr_vehicle_masks + target_adj_matrix.unsqueeze(-1).repeat(1,1,1,nbr_vehicle_masks.shape[-1])  
-        inputs['agent_node_masks']['vehicles'] = inputs['agent_node_masks']['vehicles'].int() | nbr_vehicle_masks[:,:,:,0].any(-1).int().unsqueeze(1).repeat(1,164,1).int()
+        if self.mask_frames_prob > 0:
+            target_adj_matrix = inputs['surrounding_agent_representation']['adj_matrix'][:,0,1:nbr_vehicle_feats.shape[1]+1] 
+            target_adj_matrix = target_adj_matrix.unsqueeze(-1).repeat(1,1,nbr_vehicle_feats.shape[2])         
+            # Mask out frames of nearby agents with a p% probability
+            target_adj_matrix *= torch.bernoulli(target_adj_matrix * self.mask_frames_prob) 
+            nbr_vehicle_masks = nbr_vehicle_masks + target_adj_matrix.unsqueeze(-1).repeat(1,1,1,nbr_vehicle_masks.shape[-1])  
+            inputs['agent_node_masks']['vehicles'] = inputs['agent_node_masks']['vehicles'].int() | nbr_vehicle_masks[:,:,:,0].any(-1).int().unsqueeze(1).repeat(1,164,1).int()
         ##############
 
 
@@ -137,7 +139,7 @@ class PGPEncoder(PredictionEncoder):
         nbr_ped_feats = torch.cat((nbr_ped_feats, torch.ones_like(nbr_ped_feats[:, :, :, 0:1])), dim=-1)
         nbr_ped_masks = inputs['surrounding_agent_representation']['pedestrian_masks']
         # Mask out nbr_vehicle_masks by agent 20% of the time 
-        mask_out = torch.bernoulli(torch.ones((nbr_ped_masks.shape[:2])) * self.agent_mask_prob_v).unsqueeze(-1).repeat(1,1,nbr_ped_masks.shape[-2]).unsqueeze(-1).repeat(1,1,1,nbr_ped_masks.shape[-1]).to(nbr_ped_masks.device)
+        mask_out = torch.bernoulli(torch.ones((nbr_ped_masks.shape[:2])) * self.agent_mask_prob_p).unsqueeze(-1).repeat(1,1,nbr_ped_masks.shape[-2]).unsqueeze(-1).repeat(1,1,1,nbr_ped_masks.shape[-1]).to(nbr_ped_masks.device)
         nbr_ped_masks =  ~nbr_ped_masks.bool() & ~mask_out.bool()
         inputs['agent_node_masks']['pedestrians'] = inputs['agent_node_masks']['pedestrians'].int() | mask_out[:,:,0,0].unsqueeze(1).repeat(1,164,1).int()
         nbr_ped_embedding = self.leaky_relu(self.nbr_emb(nbr_ped_feats))
