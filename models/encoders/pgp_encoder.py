@@ -118,7 +118,7 @@ class PGPEncoder(PredictionEncoder):
         
 
         ###### Mask out only some frames of vehicles that are in the radius of 20m from agent
-        if self.mask_frames_prob > 0:
+        if self.mask_frames_prob < 1:
             target_adj_matrix = inputs['surrounding_agent_representation']['adj_matrix'][:,0,1:nbr_vehicle_feats.shape[1]+1] 
             target_adj_matrix = target_adj_matrix.unsqueeze(-1).repeat(1,1,nbr_vehicle_feats.shape[2])         
             # Mask out frames of nearby agents with a p% probability
