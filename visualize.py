@@ -13,7 +13,10 @@ parser.add_argument("-w", "--checkpoint", help="Path to pre-trained or intermedi
 parser.add_argument("--num_modes", help="Number of modes to visualize", type=int, default=10)
 parser.add_argument("--example", help="Example to visualize", type=int, default=1)
 parser.add_argument("--tf", help="Prediction horizon in seconds", type=int, default=6)
-parser.add_argument("--show_predictions", help="Show predictions", action="store_true")
+parser.add_argument("--show_predictions", help="Show predictions", action="store_true", default=True)
+parser.add_argument("--counterfactual", help="Include counterfactual", action="store_true")
+parser.add_argument("--mask_lane", help="Mask gt lanes", action="store_true")
+parser.add_argument("--name", type=str, default='')
 args = parser.parse_args()
 
 
@@ -30,5 +33,6 @@ with open(args.config, 'r') as yaml_file:
 
 
 # Visualize
-vis = Visualizer(cfg, args.data_root, args.data_dir, args.checkpoint, args.example,args.show_predictions, args.tf, args.num_modes)
+vis = Visualizer(cfg, args.data_root, args.data_dir, args.checkpoint, args.example,args.show_predictions,
+                 args.tf, args.num_modes, args.counterfactual, args.mask_lane, args.name)
 vis.visualize(output_dir=args.output_dir, dataset_type=cfg['dataset'])
