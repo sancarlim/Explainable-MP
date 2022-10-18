@@ -1,7 +1,7 @@
 ## Towards Explainable Multi-modal Motion Prediction using Graph Representations
 
 This repository contains code for ["Towards Explainable Multi-modal Motion
-Prediction using Graph Representations"]() by Sandra Carrasco, Sylwia Majchrowska,Joakim Jonander, Christoffer Petterson and David Fernández LLorca, presented at .. 2022.  
+Prediction using Graph Representations"]() by Sandra Carrasco, Sylwia Majchrowska, Joakim Johnander, Christoffer Petersson and David Fernández LLorca, presented at .. 2022.  
 
 ![](https://github.com/sancarlim/Explainable-MP/blob/main/assets/readme.gif)
 
@@ -103,7 +103,7 @@ tensorboard --logdir=path/to/output/directory/tensorboard_logs
 
 ## Robustness analysis
 
-This repository contains the code to reproduce the robustness analysis (Section IV) presented in ["Towards Trustworthy Multi-Modal Motion Prediction: Evaluation and Interpretability"]() by Sandra Carrasco, Sylwia Majchrowska,Joakim Jonander, Christoffer Petterson and David Fernández LLorca, presented at .. 2022. 
+This repository contains the code to reproduce the robustness analysis (Section IV) presented in ["Towards Trustworthy Multi-Modal Motion Prediction: Evaluation and Interpretability"]() by Sandra Carrasco, Sylwia Majchrowska,Joakim Johnander, Christoffer Petersson and David Fernández LLorca, presented at .. 2022. 
 
 You can download the PGP trained model weights using [this link](https://drive.google.com/file/d/1i9Afa9UhOPAYbjB9nY6D-En0z8HgoEnl/view?usp=sharing).
 
