@@ -100,3 +100,16 @@ To launch tensorboard, run
 ```shell
 tensorboard --logdir=path/to/output/directory/tensorboard_logs
 ```
+
+## Robustness analysis
+
+This repository contains the code to reproduce the robustness analysis (Section IV) presented in ["Towards Trustworthy Multi-Modal Motion Prediction: Evaluation and Interpretability"]() by Sandra Carrasco, Sylwia Majchrowska,Joakim Jonander, Christoffer Petterson and David Fernández LLorca, presented at .. 2022. 
+
+You can download the PGP trained model weights using [this link](https://drive.google.com/file/d/1i9Afa9UhOPAYbjB9nY6D-En0z8HgoEnl/view?usp=sharing).
+
+To evaluate on the nuScenes val set, you can indicate the probability of randomly masking out dynamic objects and/or lanes in ```agent_mask_p_veh```, ```agent_mask_p_ped``` and ```lane_mask_prob``` arguments in the configuration file ```configs/xscout_pgp.yml``` . Indicate a probability of masking out random frames of interacting agents using ```mask_frames_p``` argument. 
+
+```shell
+python evaluate.py -c configs/xscout_pgp.yml -r path/to/nuScenes/root/directory -d path/to/directory/with/preprocessed/data -o path/to/output/directory -w path/to/trained/weights
+```
+
