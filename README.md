@@ -1,4 +1,4 @@
-## PGP Repository
+## Towards Explainable Multi-modal Motion Prediction using Graph Representations
 
 This repository contains code for ["Towards Explainable Multi-modal Motion
 Prediction using Graph Representations"]() by Sandra Carrasco, Sylwia Majchrowska,Joakim Jonander, Christoffer Petterson and David Fernández LLorca, presented at .. 2022.  
