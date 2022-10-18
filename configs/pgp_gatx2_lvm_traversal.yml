@@ -40,10 +40,10 @@ encoder_args:
   nbr_emb_size: 16
   nbr_enc_size: 32
   num_gat_layers: 2
-  agent_mask_p_veh: 0.1
-  agent_mask_p_ped: 0.1
-  lane_mask_p: 0.1
-  mask_frames_p: 0.2
+  agent_mask_p_veh: 0
+  agent_mask_p_ped: 0
+  lane_mask_p: 0.
+  mask_frames_p: 0.
 
 
 # Aggregator parameters

@@ -61,9 +61,9 @@ class Visualizer:
         self.encoder_type = cfg['encoder_type']
         if 'scout' in cfg['encoder_type']:
             self.collate_fn = Collate_heterograph(cfg['encoder_args'])
-        self.lane_mask_prob = cfg['encoder_args']['lane_mask_prob']
-        self.agent_mask_prob_v = cfg['encoder_args']['agent_mask_prob_v']
-        self.mask_frames = cfg['encoder_args']['mask_frames']
+        self.lane_mask_prob = cfg['encoder_args']['lane_mask_p']
+        self.agent_mask_prob_v = cfg['encoder_args']['agent_mask_p_veh']
+        self.mask_frames = cfg['encoder_args']['mask_frames_p']
         self.ns = spec_args[1][0]
         self.dataroot = data_root
         self.example = example
@@ -74,8 +74,8 @@ class Visualizer:
         self.mask_lanes = mask_lanes
         self.name = name
         self.legend = False
-        self.patch_margin = 25
-        self.min_diff_patch = 25
+        self.patch_margin = 50
+        self.min_diff_patch = 50
 
         # Initialize model
         self.model = initialize_prediction_model(cfg['encoder_type'], cfg['aggregator_type'], cfg['decoder_type'],
@@ -122,17 +122,17 @@ class Visualizer:
         if not os.path.isdir(os.path.join(output_dir, 'results', 'gifs')):
             os.mkdir(os.path.join(output_dir, 'results', 'gifs'))
         start = time.time()
-        for n, indices in enumerate(index_list[self.example:]):
+        for n, indices in enumerate(index_list):
             fancy_img, graph_img, scene = self.generate_nuscenes_gif(indices)
-            filename = os.path.join(output_dir, 'example_' + str(self.example+n) + self.name + scene + '.gif')
+            filename = os.path.join(output_dir, 'example_' + str(n) + self.name + scene + '.gif')
             imageio.mimsave(filename, fancy_img, format='GIF', fps=2)  
             for i,img in enumerate(fancy_img):
-                filename = os.path.join(output_dir, 'example' + str(self.example+n) + self.name + scene  + '_' + str(i) +'.png')
+                filename = os.path.join(output_dir, 'example' + str(n) + self.name + scene  + '_' + str(i) +'.png')
                 plt.imsave(filename, img)  
-            filename = os.path.join(output_dir, 'results', 'gifs', 'example' + str(self.example+n)+ scene + '_graph_' + self.name + '.gif')
+            filename = os.path.join(output_dir, 'results', 'gifs', 'example' + str(n)+ scene + '_graph_' + self.name + '.gif')
             imageio.mimsave(filename, graph_img, format='GIF', fps=2)  
             
-            print('Saved gif for example ' + str(self.example+n) + ' in ' + str(time.time() - start) + ' seconds')
+            print('Saved gif for example ' + str(n) + ' in ' + str(time.time() - start) + ' seconds')
 
     def get_vis_idcs_nuscenes(self):
         """
@@ -268,7 +268,7 @@ class Visualizer:
         imgs_fancy = []
         graph_img = [] 
         vehicle_masked_t = []
-        for idx in idcs[:]: 
+        for idx in idcs: 
             # Load data
             data = self.ds[idx]
             i_t = data['inputs']['instance_token']
@@ -282,9 +282,7 @@ class Visualizer:
             pose_record = self.ns.get('ego_pose', sample_data_record['ego_pose_token'])
             ego_poses=np.array(pose_record['translation'][:2])
             
-            # Render the map patch with the current ego poses. 
-            if self.example == 4 or self.example==9:
-                self.patch_margin = 25
+            # Render the map patch with the current ego poses.  
             min_patch = np.floor(ego_poses - self.patch_margin)
             max_patch = np.ceil(ego_poses + self.patch_margin)
             diff_patch = max_patch - min_patch
@@ -293,21 +291,7 @@ class Visualizer:
                 diff_patch = np.maximum(diff_patch, self.min_diff_patch)
                 min_patch = center_patch - diff_patch / 2
                 max_patch = center_patch + diff_patch / 2
-            my_patch = (min_patch[0], min_patch[1], max_patch[0], max_patch[1])
-
-            # For article visualizations
-            if self.example == 5:
-                my_patch = (min_patch[0]+25, min_patch[1]-30, max_patch[0]+25, max_patch[1]-30)
-            elif self.example == 4:
-                my_patch = (min_patch[0]+25, min_patch[1]-30, max_patch[0]+25, max_patch[1]-30)
-            elif self.example == 3:  
-                my_patch = (min_patch[0]-10, min_patch[1]+20, max_patch[0]-10 , max_patch[1]+20)
-            elif self.example == 13:  
-                my_patch = (min_patch[0]-20, min_patch[1]+20, max_patch[0]-20 , max_patch[1]+20)
-            elif self.example == 9:
-                my_patch = (min_patch[0]-20, min_patch[1]-25, max_patch[0]-20 , max_patch[1]-25)
-            elif self.example == 2 or self.example == 1 or self.example == 15:
-                my_patch = (min_patch[0]-20, min_patch[1]+10, max_patch[0]-20 , max_patch[1]+10)
+            my_patch = (min_patch[0], min_patch[1], max_patch[0], max_patch[1]) 
 
             fig2, ax2 = nusc_map.render_map_patch(my_patch, layers, figsize=(10, 10), alpha=0.3,
                                         render_egoposes_range=False,
@@ -364,7 +348,7 @@ class Visualizer:
                 elif False: #ann['instance_token'] == veh_token:
                     history = history_fict
                     data['inputs']['surrounding_agent_representation']['vehicles'][:,n,:,:] = feature 
-                elif self.example==2 and self.counterfactual and n==14:
+                elif False: #self.example==2 and self.counterfactual and n==14:
                     # change bycicle trajectory
                     history = history - (history[-1]-history[0])*1.3
                     future[ann['instance_token']] = future[ann['instance_token']] - (history[-1]-history[0])*1.3
@@ -428,14 +412,8 @@ class Visualizer:
                     ax2.add_artist(circle)
                 
             # Include fictitious agent
-            if self.counterfactual and self.example!=2:
-                if self.example==3:
-                    if idx < idcs[7]:
-                        fict_idx = 7
-                    elif idx > idcs[6]:
-                        fict_idx = 3 
-                else:  
-                    fict_idx = 3
+            if self.counterfactual and self.example!=2: 
+                fict_idx = 3
                 history_fict = np.repeat(future[i_t][fict_idx:fict_idx+1],5,0)
                 future_fict = np.repeat(future[i_t][fict_idx:fict_idx+1],12,0)
                 ax2.plot(history_fict[:, 0], history_fict[:, 1], 'k--')

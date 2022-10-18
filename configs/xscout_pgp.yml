@@ -48,6 +48,9 @@ encoder_args:
   num_gat_layers: 2 
   num_heads: 1
   hg: "hgcn"
+  agent_mask_p_veh: 0 
+  lane_mask_p: 0.
+  mask_frames_p: 0.
 
 
 # Aggregator parameters

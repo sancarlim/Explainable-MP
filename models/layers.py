@@ -310,8 +310,6 @@ class MLP(nn.Module):
         return hidden_states
 
 
-
-
 class GlobalGraph(nn.Module):
     r"""
     Global graph
@@ -556,7 +554,6 @@ class HGTLayer(nn.Module):
             return new_h
 
 
-
 class HeteroRGCNLayer(nn.Module):
     def __init__(self, in_size, out_size, etypes):
         super(HeteroRGCNLayer, self).__init__()
@@ -685,7 +682,7 @@ class ieHGCNConv(nn.Module):
                 dstdata, e_att = self.mods[etype](
                 rel_graph,
                 (h_dict[srctype], h_dict[dsttype]), 
-                att
+                get_attention=True
                 )
                 edge_att[etype] = e_att.squeeze()
                 dstdata = dstdata.squeeze(-2)
