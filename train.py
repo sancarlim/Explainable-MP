@@ -39,7 +39,7 @@ with open(args.config, 'r') as yaml_file:
 # Initialize wandb loger
 wandb_logger = None
 if not args.nowandb:
-    wandb_logger = wandb.init(job_type="training", entity='sandracl72', project='nuscenes_pgp',
+    wandb_logger = wandb.init(job_type="training", entity='entity', project='xmp',
                             config=cfg, sync_tensorboard=True) 
     wandb_logger.name=wandb.run.name
     if args.sweep:
