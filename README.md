@@ -1,4 +1,6 @@
 ## Towards Explainable Multi-modal Motion Prediction using Graph Representations
+[![DOI](https://zenodo.org/badge/553454432.svg)](https://zenodo.org/badge/latestdoi/553454432)
+
 
 This repository contains code for ["Towards Explainable Multi-modal Motion
 Prediction using Graph Representations"]() by Sandra Carrasco, Sylwia Majchrowska, Joakim Johnander, Christoffer Petersson and David Fernández LLorca, presented at .. 2022.  
