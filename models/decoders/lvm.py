@@ -69,7 +69,7 @@ class LVM(PredictionDecoder):
         # Cluster
         traj_clustered, probs = cluster_traj(self.num_clusters, traj)
 
-        predictions = {'traj': traj_clustered, 'probs': probs}
+        predictions = {'traj': traj_clustered, 'probs': probs, 'att': inputs['att']}
 
         if type(inputs) is dict:
             for key, val in inputs.items():
