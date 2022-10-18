@@ -74,7 +74,7 @@ python preprocess.py -c configs/preprocess_nuscenes.yml -r path/to/nuScenes/root
 You can download the preprocessed data in [this link](https://drive.google.com/file/d/1Ovf4eX4RtejyhX-hji77MjFjOUwTIdbH/view?usp=sharing).
 
 
-## Inference
+## Evaluation
 
 You can download the trained model weights using [this link](https://drive.google.com/file/d/1i9Afa9UhOPAYbjB9nY6D-En0z8HgoEnl/view?usp=sharing).
 
@@ -83,11 +83,14 @@ To evaluate on the nuScenes val set run the following script. This will generate
 python evaluate.py -c configs/xscout_pgp.yml -r path/to/nuScenes/root/directory -d path/to/directory/with/preprocessed/data -o path/to/output/directory -w path/to/trained/weights
 ```
 
+## Visualization
+
 To visualize predictions run the following script. This will generate gifs for a set of instance tokens (track ids) from nuScenes val at the specified output directory.  
 ```shell
 python visualize.py -c configs/xscout_pgp.yml -r path/to/nuScenes/root/directory -d path/to/directory/with/preprocessed/data -o path/to/output/directory -w path/to/trained/weights 
 ``` 
 You can indicate the number of modes and future temporal horizon to visualize with ```--num_modes``` and ```--tf``` respectively.
+
 
 ## Training
 
@@ -96,8 +99,8 @@ To train the model from scratch, run
 python train.py -c configs/xscout_pgp.yml -r path/to/nuScenes/root/directory -d path/to/directory/with/preprocessed/data -o path/to/output/directory -n 100
 ```
 
-The training script will save training checkpoints and tensorboard logs in the output directory. Wandb logger is also supported. You need to specify the entity and project in wandb.init in ```train.py```.
-
+The training script will save training checkpoints and tensorboard logs in the output directory. Wandb logger is also supported. You need to specify the entity and project in the ```wandb.init``` function in ```train.py```. If you do not want to log in wandb, please use ```--nowandb``` argument.
+ 
 To launch tensorboard, run
 ```shell
 tensorboard --logdir=path/to/output/directory/tensorboard_logs
