@@ -83,9 +83,9 @@ python evaluate.py -c configs/xscout_pgp.yml -r path/to/nuScenes/root/directory 
 
 To visualize predictions run the following script. This will generate gifs for a set of instance tokens (track ids) from nuScenes val at the specified output directory.  
 ```shell
-python visualize.py -c configs/xscout_pgp.yml -r path/to/nuScenes/root/directory -d path/to/directory/with/preprocessed/data -o path/to/output/directory -w path/to/trained/weights
-```
-
+python visualize.py -c configs/xscout_pgp.yml -r path/to/nuScenes/root/directory -d path/to/directory/with/preprocessed/data -o path/to/output/directory -w path/to/trained/weights 
+``` 
+You can indicate the number of modes and future temporal horizon to visualize with ```--num_modes``` and ```--tf``` respectively.
 
 ## Training
 
