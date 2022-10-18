@@ -378,25 +378,6 @@ class PGP_SCOUTEncoder(PredictionEncoder):
         interaction_feats_batched = torch.masked_select(interaction_feats, interaction_masks!=0) 
         interaction_feats_batched = interaction_feats_batched.view(-1, interaction_feats.shape[2]) # BN,32
         
-        # # Agent interaction (agent||veh_nbr||ped_nbr [32,162,32]-» agent_nbr_context) ! 
-        # interaction_graph = inputs['interaction_graphs'].to(target_agent_feats.device) 
-        # agent_nbr_context = self.interaction_net(interaction_graph, interaction_feats_batched, None)
-        # # Concatenate outputs of the different heads
-        # agent_nbr_context = agent_nbr_context.view(agent_nbr_context.shape[0],-1)
-
-        # # Concatenate agents encodings and agent_nbr_context
-        # interaction_feats_batched = torch.cat((interaction_feats_batched, agent_nbr_context), dim=-1) # BN,32
-        # interaction_feats = self.scatter_batched_input(interaction_feats_batched, interaction_masks[:,:,-1:].unsqueeze(-1)) # B, N, 32
-
-        # nbr_vehicle_enc = torch.cat((nbr_vehicle_enc, agent_nbr_context[1:1+nbr_vehicle_enc.shape[0]]), dim=-1)
-        # nbr_ped_enc = torch.cat((nbr_ped_enc, agent_nbr_context[1+nbr_vehicle_enc.shape[0]:]), dim=-1) 
-
-        # Encode lane nodes
-        """lane_node_feats = inputs['map_representation']['lane_node_feats']
-        lane_node_masks = inputs['map_representation']['lane_node_masks'] 
-        lane_node_embedding = self.leaky_relu(self.node_emb(lane_node_feats))
-        lane_node_enc = self.variable_size_gru_encode(lane_node_embedding, lane_node_masks, self.node_encoder) # B,164,32
-        """
         # Encode lane nodes 
         lanes_graphs = inputs['lanes_graphs'].to(target_agent_feats.device) 
         lane_node_feats = inputs['map_representation']['lane_node_feats']
@@ -413,38 +394,12 @@ class PGP_SCOUTEncoder(PredictionEncoder):
             lane_node_enc, interaction_feats_batched = self.hg_encoder(lanes_graphs, out_key=['l','v'])
         else:
             h_dict = {'l': lane_node_enc, 'p': nbr_ped_enc, 'v': interaction_feats_batched }
-            lane_node_enc, interaction_feats_batched = self.hg_encoder(lanes_graphs, h_dict)  
+            lane_node_enc, interaction_feats_batched, att = self.hg_encoder(lanes_graphs, h_dict)  
         lane_node_enc = self.scatter_batched_input(lane_node_enc, batch_lane_node_masks.unsqueeze(-1).unsqueeze(-1))
         interaction_feats = self.scatter_batched_input(interaction_feats_batched, interaction_masks[:,:,-1:].unsqueeze(-1)) # B, N, 32
         target_agent_enc = torch.cat((target_agent_enc, interaction_feats[:,0]), dim=-1) # B, 64
 
-        # Agent-node attention (between nbrs and lanes)  
-        # veh_interaction_feats = torch.cuda.FloatTensor(interaction_feats.shape[0],nbr_vehicle_feats.shape[1], interaction_feats.shape[-1])
-        # ped_interaction_feats = torch.cuda.FloatTensor(interaction_feats.shape[0],nbr_ped_feats.shape[1], interaction_feats.shape[-1]) 
-        # for i, batch in enumerate(interaction_feats): 
-        #     veh_interaction_feats[i] = interaction_feats[i,1:nbr_vehicle_feats.shape[1]+1]
-        #     ped_interaction_feats[i] = interaction_feats[i,-nbr_ped_feats.shape[1]:]
-        # queries = self.query_emb(lane_node_enc).permute(1, 0, 2)
-        # keys = self.key_emb(torch.cat((veh_interaction_feats, ped_interaction_feats), dim=1)).permute(1, 0, 2)
-        # vals = self.val_emb(torch.cat((veh_interaction_feats, ped_interaction_feats), dim=1)).permute(1, 0, 2)
-        """ nbr_encodings = torch.cat((nbr_vehicle_enc, nbr_ped_enc), dim=1)
-        queries = self.query_emb(lane_node_enc).permute(1, 0, 2)
-        keys = self.key_emb(nbr_encodings).permute(1, 0, 2)
-        vals = self.val_emb(nbr_encodings).permute(1, 0, 2)
-        attn_masks = torch.cat((inputs['agent_node_masks']['vehicles'],
-                                inputs['agent_node_masks']['pedestrians']), dim=2)
-        att_op, _ = self.a_n_att(queries, keys, vals, attn_mask=attn_masks)
-        att_op = att_op.permute(1, 0, 2) 
-
-        # Concatenate with original node encodings and 1x1 conv 
-        lane_node_enc = self.leaky_relu(self.mix(torch.cat((lane_node_enc, att_op), dim=2)))
         
-        # GAT layers
-        # Build adj matrix - treat succ and prox edges as equivalent and bidirectional
-        adj_mat = self.build_adj_mat(inputs['map_representation']['s_next'], inputs['map_representation']['edge_type'])
-        for gat_layer in self.gat:
-            lane_node_enc += gat_layer(lane_node_enc, adj_mat) 
-        """
         # Lane node masks
         lane_node_masks = ~lane_node_masks[:, :, :, 0].bool()
         lane_node_masks = lane_node_masks.any(dim=2)
@@ -462,6 +417,7 @@ class PGP_SCOUTEncoder(PredictionEncoder):
                                           'vehicle_masks': None,
                                           'pedestrian_masks': None
                                           },
+                     'att'  : att
                      }
 
         # Pass on initial nodes and edge structure to aggregator if included in inputs
