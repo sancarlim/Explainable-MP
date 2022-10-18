@@ -1,11 +1,11 @@
 from fractions import gcd
-from numbers import Number
-
 import torch
 from torch import nn
 import torch.nn.functional as F
 import math
 import dgl.nn.pytorch as dglnn
+import dgl.function as fn
+from dgl.nn.functional import edge_softmax
 
 
 # Conv layer with norm (gn or bn) and relu.
@@ -311,59 +311,6 @@ class MLP(nn.Module):
 
 
 
-class ActorNet(nn.Module):
-    """
-    Actor feature extractor with Conv1D
-    """
-    def __init__(self, n_actor, in_channels):
-        super(ActorNet, self).__init__() 
-        norm = "GN"
-        ng = 1
-
-        n_in = in_channels
-        n_out = [32, 64, 128]
-        blocks = [Res1d, Res1d, Res1d]
-        num_blocks = [2, 2, 2]
-
-        groups = []
-        for i in range(len(num_blocks)):
-            group = []
-            if i == 0:
-                group.append(blocks[i](n_in, n_out[i], norm=norm, ng=ng))
-            else:
-                group.append(blocks[i](n_in, n_out[i], stride=2, norm=norm, ng=ng))
-
-            for j in range(1, num_blocks[i]):
-                group.append(blocks[i](n_out[i], n_out[i], norm=norm, ng=ng))
-            groups.append(nn.Sequential(*group))
-            n_in = n_out[i]
-        self.groups = nn.ModuleList(groups)
-
-        n = n_actor
-        lateral = []
-        for i in range(len(n_out)):
-            lateral.append(Conv1d(n_out[i], n, norm=norm, ng=ng, act=False))
-        self.lateral = nn.ModuleList(lateral)
-
-        self.output = Res1d(n, n, norm=norm, ng=ng)
-
-    def forward(self, actors):
-        out = actors
-
-        outputs = []
-        for i in range(len(self.groups)):
-            out = self.groups[i](out)
-            outputs.append(out)
-
-        out = self.lateral[-1](outputs[-1]) # inst, 128, 3
-        for i in range(len(outputs) - 2, -1, -1):  
-            out = F.interpolate(out, size=outputs[i].size()[-1], mode="linear", align_corners=False) # 128, 3 -> 128,6 scale_factor=2
-            out += self.lateral[i](outputs[i])
-
-        out = self.output(out)[:, :, -1]
-        return out
-
-
 
 class GlobalGraph(nn.Module):
     r"""
@@ -504,13 +451,6 @@ class DecoderResCat(nn.Module):
         hidden_states = self.fc(hidden_states)
         return hidden_states
 
-import dgl
-import math
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import dgl.function as fn
-from dgl.nn.functional import edge_softmax
 
 class HGTLayer(nn.Module):
     def __init__(self,
@@ -723,6 +663,7 @@ class ieHGCNConv(nn.Module):
             key = {}
             attn = {}
             attention = {}
+            edge_att = {}
             
             # formulas (3)-1 and (3)-2
             for ntype in hg.dsttypes:
@@ -740,10 +681,14 @@ class ieHGCNConv(nn.Module):
                 if srctype not in h_dict:
                     continue
                 # formulas (2)-2
-                dstdata = self.mods[etype](
-                    rel_graph,
-                    (h_dict[srctype], h_dict[dsttype])
-                ).squeeze(-2)
+                # Retrieve edge attention from object-level aggregation
+                dstdata, e_att = self.mods[etype](
+                rel_graph,
+                (h_dict[srctype], h_dict[dsttype]), 
+                att
+                )
+                edge_att[etype] = e_att.squeeze()
+                dstdata = dstdata.squeeze(-2)
                 
                 outputs[dsttype].append(dstdata)
                 # formulas (3)-3
@@ -772,4 +717,4 @@ class ieHGCNConv(nn.Module):
             for ntype in rst.keys():
                 rst[ntype] = self.activation(rst[ntype])
             
-        return rst
+        return rst, [attention, edge_att]
