@@ -3,14 +3,14 @@
 
 
 This repository contains code for ["Towards Explainable Multi-modal Motion
-Prediction using Graph Representations"]() by Sandra Carrasco, Sylwia Majchrowska, Joakim Johnander, Christoffer Petersson and David Fernández LLorca, presented at .. 2022.  
+Prediction using Graph Representations"]() by Sandra Carrasco Limeros, Sylwia Majchrowska, Joakim Johnander, Christoffer Petersson and David Fernández LLorca, presented at .. 2022.  
 
 ![](https://github.com/sancarlim/Explainable-MP/blob/main/assets/readme.gif)
 
 ```bibtex
 citation
 ```
-Note: This repository is based on [PGP repository](https://github.com/nachiket92/PGP/tree/main/)
+Note: This repository is built on [PGP repository](https://github.com/nachiket92/PGP/tree/main/)
  
 
 ## Installation
