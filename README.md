@@ -2,13 +2,21 @@
 [![DOI](https://zenodo.org/badge/553454432.svg)](https://zenodo.org/badge/latestdoi/553454432)
 
 
-This repository contains code for ["Towards Explainable Multi-modal Motion
-Prediction using Graph Representations"]() by Sandra Carrasco Limeros, Sylwia Majchrowska, Joakim Johnander, Christoffer Petersson and David Fernández LLorca, presented at .. 2022.  
+This repository contains code for ["Towards Explainable Motion Prediction using Heterogeneous Graph Representations"](https://arxiv.org/pdf/2212.03806.pdf) by Sandra Carrasco Limeros, Sylwia Majchrowska, Joakim Johnander, Christoffer Petersson and David Fernández Llorca, 2022.  
 
 ![](https://github.com/sancarlim/Explainable-MP/blob/main/assets/readme.gif)
 
 ```bibtex
-citation
+@misc{Carrasco:22b,
+  doi = {10.48550/ARXIV.2212.03806},
+  url = {https://arxiv.org/abs/2212.03806},
+  author = {Carrasco Limeros, Sandra and Majchrowska, Sylwia
+            and Johnander, Joakim and Petersson, Christoffer
+            and Llorca, David Fernández},
+  title = {Towards Explainable Motion Prediction using Heterogeneous Graph Representations},
+  publisher = {arXiv},
+  year = {2022}
+}
 ```
 Note: This repository is built on [PGP repository](https://github.com/nachiket92/PGP/tree/main/)
  
