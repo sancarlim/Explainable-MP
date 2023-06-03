@@ -26,9 +26,9 @@ import time
 
 # Initialize device:
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-ego_car = plt.imread('/media/14TBDISK/sandra//DBU_Graph/NuScenes/icons/Car TOP_VIEW ROBOT.png')
-agent = plt.imread('/media/14TBDISK/sandra/DBU_Graph/NuScenes/icons/Car TOP_VIEW 375397.png')
-cars = plt.imread('/media/14TBDISK/sandra/DBU_Graph/NuScenes/icons/Car TOP_VIEW 80CBE5.png') 
+ego_car = plt.imread('../icons/Car TOP_VIEW ROBOT.png')
+agent = plt.imread('../icons/Car TOP_VIEW 375397.png')
+cars = plt.imread('../icons/Car TOP_VIEW 80CBE5.png') 
 
 layers = ['drivable_area', 
           'lane',
